@@ -7,6 +7,7 @@ export default function Footer() {
         <div className={styles.row}>
           <div className={styles.left}>2025 @alexisanibal</div>
           <div className={styles.right}>
+            <span className={styles.dev}>Developed by Rozuar</span>
             <a className={styles.link} href="#contact">
               Contacto
             </a>

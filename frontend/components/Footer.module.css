@@ -15,6 +15,16 @@
   text-transform: uppercase;
 }
 
+.dev {
+  opacity: 0.7;
+}
+
+.right {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
 .link {
   text-decoration: underline;
   text-underline-offset: 3px;
