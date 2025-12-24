@@ -1,0 +1,29 @@
+.footer {
+  padding: 26px 0;
+  border-top: 1px solid rgba(0, 0, 0, 0.08);
+  color: var(--text-light);
+  background: var(--bg-light);
+}
+
+.row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.link {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+@media (max-width: 680px) {
+  .row {
+    flex-direction: column;
+  }
+}
+
+

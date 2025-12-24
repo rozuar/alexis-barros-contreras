@@ -1,0 +1,45 @@
+.about {
+  padding: 100px 0;
+  background: white;
+}
+
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 20px;
+}
+
+.title {
+  font-family: var(--font-serif), ui-serif, Georgia, 'Times New Roman', Times,
+    serif;
+  font-size: 48px;
+  font-weight: 600;
+  text-align: center;
+  margin-bottom: 60px;
+  color: var(--primary-color);
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+
+.content {
+  max-width: 800px;
+  margin: 0 auto;
+  font-size: 18px;
+  line-height: 1.8;
+  color: var(--text-light);
+}
+
+.content p {
+  margin-bottom: 30px;
+}
+
+@media (max-width: 768px) {
+  .about {
+    padding: 60px 0;
+  }
+
+  .title {
+    font-size: 36px;
+  }
+}
+

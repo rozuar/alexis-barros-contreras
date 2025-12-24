@@ -1,0 +1,42 @@
+# Editor / tools
+.claude/
+.cursor/
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env files
+.env
+.env.*
+!.env.example
+
+# Node / Next / logs
+**/node_modules/
+**/.next/
+**/.turbo/
+**/dist/
+**/build/
+**/.cache/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Go
+**/bin/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# React Native (common)
+**/android/.gradle/
+**/android/local.properties
+**/ios/Pods/
+**/ios/build/
+
+
