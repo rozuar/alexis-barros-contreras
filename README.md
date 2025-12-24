@@ -38,6 +38,7 @@ API REST que sirve las obras, imágenes, videos y bitácoras.
 cd backend
 go mod download
 export ADMIN_TOKEN="cambia-esto-por-un-token-largo"
+export DATABASE_URL="postgres://alexis:alexis_password@localhost:5433/alexis_art?sslmode=disable"
 go run .
 ```
 
@@ -114,7 +115,7 @@ npm run android
 1. **Iniciar Backend**:
    ```bash
    cd backend
-   go run main.go
+   go run .
    ```
 
 2. **Iniciar Frontend Web** (en otra terminal):
@@ -198,6 +199,20 @@ cd frontend
 npm run build
 npm start
 ```
+
+### Deploy en Railway (1 servicio)
+
+El repo incluye un `Dockerfile` que levanta:
+- **backend Go** en `8090` (interno)
+- **frontend Next** en `$PORT` (público) y hace proxy a `BACKEND_URL=http://127.0.0.1:8090`
+
+Variables recomendadas en Railway:
+
+- `ADMIN_TOKEN`: token para backoffice/endpoints admin
+- `DATABASE_URL`: Postgres (Railway) para metadatos/detalle/bitácora
+- `ARTWORKS_DIR`: si el servicio tiene acceso al filesystem con `art/` (default `../art` para dev; en Docker queda `/app/../art` no existe)
+
+Nota: En Railway normalmente no tendrás el folder `art/` con imágenes a menos que lo incluyas en el build o uses storage externo. Para producción, lo ideal es subir imágenes a un bucket (S3/R2) o montar un volumen.
 
 ### Mobile
 ```bash

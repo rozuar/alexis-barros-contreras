@@ -1,1 +1,1 @@
-Detalle admin test
+Detalle guardado en DB

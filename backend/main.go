@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -9,9 +10,14 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/gorilla/mux"
+	"github.com/joho/godotenv"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/cors"
+
+	"alexis-art-backend/db"
 )
 
 type Artwork struct {
@@ -54,8 +60,11 @@ type ErrorResponse struct {
 
 var artworksDir string
 var adminToken string
+var pgPool *pgxpool.Pool
 
 func main() {
+	_ = godotenv.Load()
+
 	// Get artworks directory from environment or use default
 	artworksDir = os.Getenv("ARTWORKS_DIR")
 	if artworksDir == "" {
@@ -67,6 +76,27 @@ func main() {
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8090"
+	}
+
+	// Optional Postgres
+	if databaseURL := os.Getenv("DATABASE_URL"); strings.TrimSpace(databaseURL) != "" {
+		ctx := context.Background()
+		pool, err := db.Connect(ctx, databaseURL)
+		if err != nil {
+			log.Printf("Postgres connect failed (continuing without DB): %v", err)
+			pool = nil
+		}
+		if pool != nil {
+			if err := db.Migrate(ctx, pool, "./db/migrations"); err != nil {
+				log.Printf("Postgres migrate failed (continuing without DB): %v", err)
+				pool.Close()
+				pool = nil
+			}
+		}
+		pgPool = pool
+		if pgPool != nil {
+			log.Printf("Postgres enabled")
+		}
 	}
 
 	r := mux.NewRouter()
@@ -303,6 +333,32 @@ func scanArtworkDirectory(id, path string) (Artwork, error) {
 	sort.Strings(artwork.Images)
 	sort.Strings(artwork.Videos)
 
+	// If Postgres is enabled, overlay editable fields from DB.
+	if pgPool != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		row, err := db.GetArtwork(ctx, pgPool, id)
+		if err == nil && row != nil {
+			if row.Title != "" {
+				artwork.Title = row.Title
+			}
+			artwork.PaintedLocation = row.PaintedLocation
+			if row.StartDate != nil {
+				artwork.StartDate = row.StartDate.Format("2006-01-02")
+			}
+			if row.EndDate != nil {
+				artwork.EndDate = row.EndDate.Format("2006-01-02")
+			}
+			artwork.InProgress = row.InProgress
+			if row.Detalle != "" {
+				artwork.Detalle = row.Detalle
+			}
+			if row.Bitacora != "" {
+				artwork.Bitacora = row.Bitacora
+			}
+		}
+	}
+
 	return artwork, nil
 }
 
@@ -406,6 +462,34 @@ func adminUpsertArtwork(w http.ResponseWriter, r *http.Request) {
 			respondWithError(w, http.StatusInternalServerError, "Failed to write bitacora.txt")
 			return
 		}
+	}
+
+	// Persist to Postgres (optional)
+	if pgPool != nil {
+		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+		defer cancel()
+		var sd *time.Time
+		var ed *time.Time
+		if strings.TrimSpace(payload.StartDate) != "" {
+			if t, err := time.Parse("2006-01-02", strings.TrimSpace(payload.StartDate)); err == nil {
+				sd = &t
+			}
+		}
+		if strings.TrimSpace(payload.EndDate) != "" {
+			if t, err := time.Parse("2006-01-02", strings.TrimSpace(payload.EndDate)); err == nil {
+				ed = &t
+			}
+		}
+		_ = db.UpsertArtwork(ctx, pgPool, db.ArtworkRow{
+			ID:              id,
+			Title:           "", // keep computed title unless you want to manage it
+			PaintedLocation: strings.TrimSpace(payload.PaintedLocation),
+			StartDate:       sd,
+			EndDate:         ed,
+			InProgress:      payload.InProgress,
+			Detalle:         payload.Detalle,
+			Bitacora:        payload.Bitacora,
+		})
 	}
 
 	updated, err := getArtworkByID(id)

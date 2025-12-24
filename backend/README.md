@@ -61,6 +61,7 @@ Health check endpoint.
 - `PORT`: Puerto del servidor (default: 8080)
 - `ARTWORKS_DIR`: Directorio donde están las obras (default: ../art)
 - `ADMIN_TOKEN`: Token para endpoints de administración (obligatorio para /api/v1/admin/*)
+- `DATABASE_URL`: Cadena de conexión Postgres (si se define, la app usa Postgres para meta/detalle/bitácora)
 
 ### Ejemplo
 
@@ -68,7 +69,8 @@ Health check endpoint.
 export PORT=8080
 export ARTWORKS_DIR=../art
 export ADMIN_TOKEN=cambia-esto-por-un-token-largo
-go run main.go
+export DATABASE_URL="postgres://alexis:alexis_password@localhost:5433/alexis_art?sslmode=disable"
+go run .
 ```
 
 ## Endpoints Admin (Backoffice)

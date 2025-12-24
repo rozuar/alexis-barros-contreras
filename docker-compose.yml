@@ -1,0 +1,17 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: alexis_art_pg
+    environment:
+      POSTGRES_DB: alexis_art
+      POSTGRES_USER: alexis
+      POSTGRES_PASSWORD: alexis_password
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:
+
+
