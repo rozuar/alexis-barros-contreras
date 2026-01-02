@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -19,6 +20,8 @@ import (
 
 	"alexis-art-backend/db"
 )
+
+const maxUploadSize = 10 << 20 // 10MB
 
 type Artwork struct {
 	ID       string   `json:"id"`
@@ -114,6 +117,8 @@ func main() {
 	admin.HandleFunc("/artworks", adminListArtworks).Methods("GET")
 	admin.HandleFunc("/artworks/{id}", adminGetArtwork).Methods("GET")
 	admin.HandleFunc("/artworks/{id}", adminUpsertArtwork).Methods("PUT")
+	admin.HandleFunc("/artworks/{id}/images", adminUploadImage).Methods("POST")
+	admin.HandleFunc("/artworks/{id}/images/{filename}", adminDeleteImage).Methods("DELETE")
 
 	// Health check
 	r.HandleFunc("/health", healthCheck).Methods("GET")
@@ -121,7 +126,7 @@ func main() {
 	// CORS configuration
 	c := cors.New(cors.Options{
 		AllowedOrigins: []string{"*"}, // In production, specify exact origins
-		AllowedMethods: []string{"GET", "PUT", "OPTIONS"},
+		AllowedMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders: []string{"*"},
 	})
 
@@ -525,5 +530,172 @@ func respondWithError(w http.ResponseWriter, code int, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(ErrorResponse{Error: message})
+}
+
+func adminUploadImage(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id := vars["id"]
+	if !isSafeArtworkID(id) {
+		respondWithError(w, http.StatusBadRequest, "Invalid artwork id")
+		return
+	}
+
+	artworkPath := filepath.Join(artworksDir, id)
+	if _, err := os.Stat(artworkPath); os.IsNotExist(err) {
+		respondWithError(w, http.StatusNotFound, "Artwork not found")
+		return
+	}
+
+	// Limit upload size
+	r.Body = http.MaxBytesReader(w, r.Body, maxUploadSize)
+	if err := r.ParseMultipartForm(maxUploadSize); err != nil {
+		respondWithError(w, http.StatusBadRequest, "File too large (max 10MB)")
+		return
+	}
+
+	file, header, err := r.FormFile("image")
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "No image file provided")
+		return
+	}
+	defer file.Close()
+
+	// Validate content type
+	contentType := header.Header.Get("Content-Type")
+	if !isValidImageType(contentType) {
+		respondWithError(w, http.StatusBadRequest, "Invalid file type. Allowed: JPEG, PNG, GIF")
+		return
+	}
+
+	// Generate safe filename
+	ext := filepath.Ext(header.Filename)
+	if ext == "" {
+		ext = getExtensionFromMime(contentType)
+	}
+	safeFilename := fmt.Sprintf("%d_%s%s", time.Now().UnixNano(), sanitizeFilename(header.Filename), ext)
+
+	// Save file
+	destPath := filepath.Join(artworkPath, safeFilename)
+	destFile, err := os.Create(destPath)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to save image")
+		return
+	}
+	defer destFile.Close()
+
+	if _, err := io.Copy(destFile, file); err != nil {
+		os.Remove(destPath)
+		respondWithError(w, http.StatusInternalServerError, "Failed to save image")
+		return
+	}
+
+	// Return updated artwork
+	updated, err := getArtworkByID(id)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to re-read artwork")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(updated)
+}
+
+func adminDeleteImage(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id := vars["id"]
+	filename := vars["filename"]
+
+	if !isSafeArtworkID(id) {
+		respondWithError(w, http.StatusBadRequest, "Invalid artwork id")
+		return
+	}
+
+	// Validate filename (no path traversal)
+	if strings.Contains(filename, "/") || strings.Contains(filename, "\\") || strings.Contains(filename, "..") {
+		respondWithError(w, http.StatusBadRequest, "Invalid filename")
+		return
+	}
+
+	artworkPath := filepath.Join(artworksDir, id)
+	imagePath := filepath.Join(artworkPath, filename)
+
+	// Security check
+	absArtworks, _ := filepath.Abs(artworksDir)
+	absImage, _ := filepath.Abs(imagePath)
+	if !strings.HasPrefix(absImage, absArtworks) {
+		respondWithError(w, http.StatusForbidden, "Invalid path")
+		return
+	}
+
+	// Check if file exists
+	if _, err := os.Stat(imagePath); os.IsNotExist(err) {
+		respondWithError(w, http.StatusNotFound, "Image not found")
+		return
+	}
+
+	// Check query param: deleteFile=true to actually delete from disk
+	deleteFromDisk := r.URL.Query().Get("deleteFile") == "true"
+
+	if deleteFromDisk {
+		if err := os.Remove(imagePath); err != nil {
+			respondWithError(w, http.StatusInternalServerError, "Failed to delete image")
+			return
+		}
+	}
+
+	// Return updated artwork
+	updated, err := getArtworkByID(id)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to re-read artwork")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(updated)
+}
+
+func isValidImageType(contentType string) bool {
+	validTypes := []string{"image/jpeg", "image/png", "image/gif"}
+	for _, t := range validTypes {
+		if strings.HasPrefix(contentType, t) {
+			return true
+		}
+	}
+	return false
+}
+
+func getExtensionFromMime(contentType string) string {
+	switch {
+	case strings.HasPrefix(contentType, "image/jpeg"):
+		return ".jpg"
+	case strings.HasPrefix(contentType, "image/png"):
+		return ".png"
+	case strings.HasPrefix(contentType, "image/gif"):
+		return ".gif"
+	default:
+		return ".jpg"
+	}
+}
+
+func sanitizeFilename(filename string) string {
+	// Remove extension and path
+	base := filepath.Base(filename)
+	ext := filepath.Ext(base)
+	name := strings.TrimSuffix(base, ext)
+
+	// Keep only alphanumeric and hyphens
+	var result strings.Builder
+	for _, r := range name {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			result.WriteRune(r)
+		}
+	}
+
+	s := result.String()
+	if len(s) > 50 {
+		s = s[:50]
+	}
+	if s == "" {
+		s = "image"
+	}
+	return s
 }
 
