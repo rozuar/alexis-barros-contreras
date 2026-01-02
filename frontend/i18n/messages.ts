@@ -60,7 +60,7 @@ export const messages: Record<Locale, Messages> = {
   es: {
     nav: {
       home: 'INICIO',
-      about: 'SOBRE',
+      about: 'BIO',
       portfolio: 'PORTAFOLIO',
       contact: 'CONTACTO',
       language: 'Idioma',
@@ -71,7 +71,7 @@ export const messages: Record<Locale, Messages> = {
       goToSlide: (title) => `Ir a ${title}`,
     },
     sections: {
-      aboutTitle: 'SOBRE',
+      aboutTitle: 'BIOGRAFÍA',
       portfolioTitle: 'PORTAFOLIO',
       contactTitle: 'CONTACTO',
     },
