@@ -12,6 +12,9 @@ RUN go mod download
 # Copy source code
 COPY . .
 
+# Ensure art directory exists even if it is not tracked in git (bucket mode)
+RUN mkdir -p /app/art
+
 # Build binary
 RUN CGO_ENABLED=0 GOOS=linux go build -o /out/backend .
 

@@ -200,19 +200,28 @@ npm run build
 npm start
 ```
 
-### Deploy en Railway (1 servicio)
+### Deploy en Railway con CI/CD
 
-El repo incluye un `Dockerfile` que levanta:
-- **backend Go** en `8090` (interno)
-- **frontend Next** en `$PORT` (público) y hace proxy a `BACKEND_URL=http://127.0.0.1:8090`
+El proyecto está configurado con GitHub Actions para CI/CD automático:
 
-Variables recomendadas en Railway:
+**Servicios separados**:
+- **backend Go** - API REST
+- **frontend Next** - Aplicación web  
+- **backoffice Next** - Panel administrativo
 
-- `ADMIN_TOKEN`: token para backoffice/endpoints admin
-- `DATABASE_URL`: Postgres (Railway) para metadatos/detalle/bitácora
-- `ARTWORKS_DIR`: si el servicio tiene acceso al filesystem con `art/` (default `../art` para dev; en Docker queda `/app/../art` no existe)
+**Pipeline CI/CD**:
+- Tests automáticos en cada push/PR
+- Linting y análisis de seguridad
+- Deploy automático a Railway desde `main` (producción) y `develop` (staging)
 
-Nota: En Railway normalmente no tendrás el folder `art/` con imágenes a menos que lo incluyas en el build o uses storage externo. Para producción, lo ideal es subir imágenes a un bucket (S3/R2) o montar un volumen.
+**Configuración Railway**:
+- `RAILWAY_TOKEN`: Token de API Railway (GitHub secret)
+- `DATABASE_URL`: Postgres (Railway)
+- `ADMIN_TOKEN`: Autenticación admin endpoints
+- `NEXT_PUBLIC_API_URL`: URL backend para frontend
+- `BACKEND_URL`: URL backend para backoffice
+
+**Ver detalles**: [CI-CD.md](./CI-CD.md)
 
 ### Mobile
 ```bash
