@@ -21,6 +21,7 @@ type ArtworkRow struct {
 	InProgress      bool
 	Detalle         string
 	Bitacora        string
+	PrimaryImage    string
 }
 
 func Connect(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
@@ -43,20 +44,27 @@ func Connect(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
 }
 
 func Migrate(ctx context.Context, pool *pgxpool.Pool, migrationsDir string) error {
-	path := filepath.Join(migrationsDir, "001_init.sql")
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return fmt.Errorf("read migration: %w", err)
+	// Run all migration files in order
+	migrations := []string{
+		"001_init.sql",
+		"002_title_unique_and_primary_image.sql",
 	}
-	// very small/simple migration runner
-	sql := string(b)
-	stmts := splitSQLStatements(sql)
-	for _, s := range stmts {
-		if strings.TrimSpace(s) == "" {
-			continue
+
+	for _, filename := range migrations {
+		path := filepath.Join(migrationsDir, filename)
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("read migration %s: %w", filename, err)
 		}
-		if _, err := pool.Exec(ctx, s); err != nil {
-			return fmt.Errorf("migration exec failed: %w", err)
+		sql := string(b)
+		stmts := splitSQLStatements(sql)
+		for _, s := range stmts {
+			if strings.TrimSpace(s) == "" {
+				continue
+			}
+			if _, err := pool.Exec(ctx, s); err != nil {
+				return fmt.Errorf("migration %s exec failed: %w", filename, err)
+			}
 		}
 	}
 	return nil
@@ -88,13 +96,13 @@ func splitSQLStatements(sql string) []string {
 
 func GetArtwork(ctx context.Context, pool *pgxpool.Pool, id string) (*ArtworkRow, error) {
 	row := pool.QueryRow(ctx, `
-		SELECT id, title, painted_location, start_date, end_date, in_progress, detalle, bitacora
+		SELECT id, title, painted_location, start_date, end_date, in_progress, detalle, bitacora, primary_image
 		FROM artworks
 		WHERE id=$1
 	`, id)
 
 	var r ArtworkRow
-	if err := row.Scan(&r.ID, &r.Title, &r.PaintedLocation, &r.StartDate, &r.EndDate, &r.InProgress, &r.Detalle, &r.Bitacora); err != nil {
+	if err := row.Scan(&r.ID, &r.Title, &r.PaintedLocation, &r.StartDate, &r.EndDate, &r.InProgress, &r.Detalle, &r.Bitacora, &r.PrimaryImage); err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, nil
 		}
@@ -105,8 +113,8 @@ func GetArtwork(ctx context.Context, pool *pgxpool.Pool, id string) (*ArtworkRow
 
 func UpsertArtwork(ctx context.Context, pool *pgxpool.Pool, r ArtworkRow) error {
 	_, err := pool.Exec(ctx, `
-		INSERT INTO artworks (id, title, painted_location, start_date, end_date, in_progress, detalle, bitacora)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+		INSERT INTO artworks (id, title, painted_location, start_date, end_date, in_progress, detalle, bitacora, primary_image)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
 		ON CONFLICT (id) DO UPDATE SET
 			title=EXCLUDED.title,
 			painted_location=EXCLUDED.painted_location,
@@ -115,7 +123,46 @@ func UpsertArtwork(ctx context.Context, pool *pgxpool.Pool, r ArtworkRow) error 
 			in_progress=EXCLUDED.in_progress,
 			detalle=EXCLUDED.detalle,
 			bitacora=EXCLUDED.bitacora,
+			primary_image=EXCLUDED.primary_image,
 			updated_at=NOW()
-	`, r.ID, r.Title, r.PaintedLocation, r.StartDate, r.EndDate, r.InProgress, r.Detalle, r.Bitacora)
+	`, r.ID, r.Title, r.PaintedLocation, r.StartDate, r.EndDate, r.InProgress, r.Detalle, r.Bitacora, r.PrimaryImage)
 	return err
+}
+
+// IsTitleUnique checks if a title is unique (excluding the given ID for updates)
+func IsTitleUnique(ctx context.Context, pool *pgxpool.Pool, title, excludeID string) (bool, error) {
+	if strings.TrimSpace(title) == "" {
+		return false, fmt.Errorf("title cannot be empty")
+	}
+	var count int
+	err := pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM artworks WHERE title = $1 AND id != $2
+	`, title, excludeID).Scan(&count)
+	if err != nil {
+		return false, err
+	}
+	return count == 0, nil
+}
+
+// ListArtworks returns all artworks ordered by start_date (nulls last), then by title
+func ListArtworks(ctx context.Context, pool *pgxpool.Pool) ([]ArtworkRow, error) {
+	rows, err := pool.Query(ctx, `
+		SELECT id, title, painted_location, start_date, end_date, in_progress, detalle, bitacora, primary_image
+		FROM artworks
+		ORDER BY start_date DESC NULLS LAST, title ASC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []ArtworkRow
+	for rows.Next() {
+		var r ArtworkRow
+		if err := rows.Scan(&r.ID, &r.Title, &r.PaintedLocation, &r.StartDate, &r.EndDate, &r.InProgress, &r.Detalle, &r.Bitacora, &r.PrimaryImage); err != nil {
+			return nil, err
+		}
+		result = append(result, r)
+	}
+	return result, rows.Err()
 }

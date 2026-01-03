@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -34,6 +36,7 @@ type Artwork struct {
 	EndDate         string   `json:"endDate,omitempty"`
 	InProgress      bool     `json:"inProgress,omitempty"`
 	Bitacora        string   `json:"bitacora,omitempty"`
+	PrimaryImage    string   `json:"primaryImage,omitempty"`
 }
 
 type artworkMeta struct {
@@ -44,12 +47,18 @@ type artworkMeta struct {
 }
 
 type adminArtworkUpdate struct {
+	Title           string `json:"title"`
 	PaintedLocation string `json:"paintedLocation"`
 	StartDate       string `json:"startDate"`
 	EndDate         string `json:"endDate"`
 	InProgress      bool   `json:"inProgress"`
 	Detalle         string `json:"detalle"`
 	Bitacora        string `json:"bitacora"`
+	PrimaryImage    string `json:"primaryImage"`
+}
+
+type adminArtworkCreate struct {
+	Title string `json:"title"`
 }
 
 type ArtworkListResponse struct {
@@ -127,10 +136,12 @@ func main() {
 	admin := api.PathPrefix("/admin").Subrouter()
 	admin.Use(adminAuthMiddleware)
 	admin.HandleFunc("/artworks", adminListArtworks).Methods("GET")
+	admin.HandleFunc("/artworks", adminCreateArtwork).Methods("POST")
 	admin.HandleFunc("/artworks/{id}", adminGetArtwork).Methods("GET")
 	admin.HandleFunc("/artworks/{id}", adminUpsertArtwork).Methods("PUT")
 	admin.HandleFunc("/artworks/{id}/images", adminUploadImage).Methods("POST")
 	admin.HandleFunc("/artworks/{id}/images/{filename}", adminDeleteImage).Methods("DELETE")
+	admin.HandleFunc("/artworks/check-title", adminCheckTitle).Methods("GET")
 
 	// Health check
 	r.HandleFunc("/health", healthCheck).Methods("GET")
@@ -396,7 +407,15 @@ func scanArtworkDirectory(id, path string) (Artwork, error) {
 			if row.Bitacora != "" {
 				artwork.Bitacora = row.Bitacora
 			}
+			if row.PrimaryImage != "" {
+				artwork.PrimaryImage = row.PrimaryImage
+			}
 		}
+	}
+
+	// Default primary image to first image if not set
+	if artwork.PrimaryImage == "" && len(artwork.Images) > 0 {
+		artwork.PrimaryImage = artwork.Images[0]
 	}
 
 	return artwork, nil
@@ -434,8 +453,133 @@ func adminListArtworks(w http.ResponseWriter, r *http.Request) {
 		respondWithError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
+	// Sort by start_date DESC (nulls last), then by title ASC
+	sort.Slice(artworks, func(i, j int) bool {
+		// Both have dates
+		if artworks[i].StartDate != "" && artworks[j].StartDate != "" {
+			return artworks[i].StartDate > artworks[j].StartDate // DESC
+		}
+		// Only i has date - i comes first
+		if artworks[i].StartDate != "" && artworks[j].StartDate == "" {
+			return true
+		}
+		// Only j has date - j comes first
+		if artworks[i].StartDate == "" && artworks[j].StartDate != "" {
+			return false
+		}
+		// Neither has date - sort by title ASC
+		return strings.ToLower(artworks[i].Title) < strings.ToLower(artworks[j].Title)
+	})
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(ArtworkListResponse{Artworks: artworks, Total: len(artworks)})
+}
+
+func generateArtworkID() string {
+	b := make([]byte, 8)
+	rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+func adminCreateArtwork(w http.ResponseWriter, r *http.Request) {
+	if pgPool == nil {
+		respondWithError(w, http.StatusInternalServerError, "Database not configured")
+		return
+	}
+
+	var payload adminArtworkCreate
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid JSON")
+		return
+	}
+
+	title := strings.TrimSpace(payload.Title)
+	if title == "" {
+		respondWithError(w, http.StatusBadRequest, "Title is required")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+	defer cancel()
+
+	// Check title uniqueness
+	unique, err := db.IsTitleUnique(ctx, pgPool, title, "")
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to check title uniqueness")
+		return
+	}
+	if !unique {
+		respondWithError(w, http.StatusConflict, "Title already exists")
+		return
+	}
+
+	// Generate unique ID
+	id := generateArtworkID()
+
+	// Create folder in S3 or disk
+	if s3Store != nil {
+		// Create a placeholder file to establish the prefix
+		key := id + "/.placeholder"
+		if err := s3Store.putObject(ctx, key, strings.NewReader(""), "text/plain"); err != nil {
+			respondWithError(w, http.StatusInternalServerError, "Failed to create artwork folder")
+			return
+		}
+	} else {
+		artworkPath := filepath.Join(artworksDir, id)
+		if err := os.MkdirAll(artworkPath, 0755); err != nil {
+			respondWithError(w, http.StatusInternalServerError, "Failed to create artwork folder")
+			return
+		}
+	}
+
+	// Save to database
+	err = db.UpsertArtwork(ctx, pgPool, db.ArtworkRow{
+		ID:    id,
+		Title: title,
+	})
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to save artwork")
+		return
+	}
+
+	artwork := Artwork{
+		ID:     id,
+		Title:  title,
+		Images: []string{},
+		Videos: []string{},
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(artwork)
+}
+
+func adminCheckTitle(w http.ResponseWriter, r *http.Request) {
+	if pgPool == nil {
+		respondWithError(w, http.StatusInternalServerError, "Database not configured")
+		return
+	}
+
+	title := strings.TrimSpace(r.URL.Query().Get("title"))
+	excludeID := strings.TrimSpace(r.URL.Query().Get("excludeId"))
+
+	if title == "" {
+		respondWithError(w, http.StatusBadRequest, "Title parameter is required")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+
+	unique, err := db.IsTitleUnique(ctx, pgPool, title, excludeID)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to check title")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]bool{"available": unique})
 }
 
 func adminGetArtwork(w http.ResponseWriter, r *http.Request) {
@@ -543,10 +687,25 @@ func adminUpsertArtwork(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Persist to Postgres (optional)
+	// Persist to Postgres (required for title/primaryImage)
 	if pgPool != nil {
 		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 		defer cancel()
+
+		// Validate title uniqueness if provided
+		title := strings.TrimSpace(payload.Title)
+		if title != "" {
+			unique, err := db.IsTitleUnique(ctx, pgPool, title, id)
+			if err != nil {
+				respondWithError(w, http.StatusInternalServerError, "Failed to check title uniqueness")
+				return
+			}
+			if !unique {
+				respondWithError(w, http.StatusConflict, "Title already exists")
+				return
+			}
+		}
+
 		var sd *time.Time
 		var ed *time.Time
 		if strings.TrimSpace(payload.StartDate) != "" {
@@ -561,13 +720,14 @@ func adminUpsertArtwork(w http.ResponseWriter, r *http.Request) {
 		}
 		_ = db.UpsertArtwork(ctx, pgPool, db.ArtworkRow{
 			ID:              id,
-			Title:           "", // keep computed title unless you want to manage it
+			Title:           title,
 			PaintedLocation: strings.TrimSpace(payload.PaintedLocation),
 			StartDate:       sd,
 			EndDate:         ed,
 			InProgress:      payload.InProgress,
 			Detalle:         payload.Detalle,
 			Bitacora:        payload.Bitacora,
+			PrimaryImage:    strings.TrimSpace(payload.PrimaryImage),
 		})
 	}
 

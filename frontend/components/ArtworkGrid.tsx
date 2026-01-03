@@ -51,7 +51,7 @@ export default function ArtworkGrid({ artworks, onArtworkClick, loading }: Artwo
               <div className={styles.imageContainer}>
                 {artwork.images.length > 0 && (
                   <img
-                    src={`/api/v1/artworks/${artwork.id}/images/${artwork.images[0]}`}
+                    src={`/api/v1/artworks/${artwork.id}/images/${artwork.primaryImage || artwork.images[0]}`}
                     alt={artwork.title}
                     className={styles.image}
                     loading="lazy"

@@ -18,6 +18,7 @@ export interface Artwork {
   endDate?: string
   inProgress?: boolean
   bitacora?: string
+  primaryImage?: string
 }
 
 const HERO_ARTWORK_IDS = ['ciego', 'cisne', 'eland', 'indigenas', 'indio'] as const
@@ -61,7 +62,7 @@ export default function Home() {
           .map((a) => ({
             id: a.id,
             title: a.title,
-            imageUrl: `/api/v1/artworks/${a.id}/images/${a.images[0]}`,
+            imageUrl: `/api/v1/artworks/${a.id}/images/${a.primaryImage || a.images[0]}`,
           }))}
       />
       <About />

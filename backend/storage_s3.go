@@ -304,7 +304,15 @@ func (s *s3ArtworksStore) scanArtwork(ctx context.Context, id string) (Artwork, 
 			if row.Bitacora != "" {
 				artwork.Bitacora = row.Bitacora
 			}
+			if row.PrimaryImage != "" {
+				artwork.PrimaryImage = row.PrimaryImage
+			}
 		}
+	}
+
+	// Default primary image to first image if not set
+	if artwork.PrimaryImage == "" && len(artwork.Images) > 0 {
+		artwork.PrimaryImage = artwork.Images[0]
 	}
 
 	return artwork, nil

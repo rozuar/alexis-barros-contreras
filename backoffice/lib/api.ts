@@ -9,17 +9,22 @@ export type Artwork = {
   startDate?: string
   endDate?: string
   inProgress?: boolean
+  primaryImage?: string
 }
 
 export type ArtworkListResponse = { artworks: Artwork[]; total: number }
 
 export type AdminUpdate = {
+  title: string
   paintedLocation: string
   startDate: string
   endDate: string
   inProgress: boolean
   detalle: string
   bitacora: string
+  primaryImage: string
 }
 
-
+export type AdminCreate = {
+  title: string
+}

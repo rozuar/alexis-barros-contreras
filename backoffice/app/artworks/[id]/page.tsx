@@ -14,31 +14,34 @@ export default function ArtworkEditPage() {
 
   const [artwork, setArtwork] = useState<Artwork | null>(null)
   const [form, setForm] = useState<AdminUpdate>({
+    title: '',
     paintedLocation: '',
     startDate: '',
     endDate: '',
     inProgress: false,
     detalle: '',
     bitacora: '',
+    primaryImage: '',
   })
   const [status, setStatus] = useState<string>('')
+  const [titleError, setTitleError] = useState('')
   const [uploading, setUploading] = useState(false)
   const [deleteModal, setDeleteModal] = useState<{ open: boolean; filename: string }>({
     open: false,
     filename: '',
   })
 
+  const token = getToken()
+
   useEffect(() => {
-    const token = getToken()
     if (!token) {
       router.replace('/login')
       return
     }
     loadArtwork()
-  }, [id, router])
+  }, [id, router, token])
 
   const loadArtwork = async () => {
-    const token = getToken()
     const res = await fetch(`/api/v1/admin/artworks/${encodeURIComponent(id)}`, {
       headers: { Authorization: `Bearer ${token}` },
     })
@@ -49,18 +52,46 @@ export default function ArtworkEditPage() {
     const a = (await res.json()) as Artwork
     setArtwork(a)
     setForm({
+      title: a.title || '',
       paintedLocation: a.paintedLocation || '',
       startDate: a.startDate || '',
       endDate: a.endDate || '',
       inProgress: !!a.inProgress,
       detalle: a.detalle || '',
       bitacora: a.bitacora || '',
+      primaryImage: a.primaryImage || '',
     })
   }
 
+  const checkTitleAvailability = async (title: string) => {
+    if (!title.trim()) {
+      setTitleError('El nombre es requerido')
+      return
+    }
+    try {
+      const res = await fetch(
+        `/api/v1/admin/artworks/check-title?title=${encodeURIComponent(title)}&excludeId=${encodeURIComponent(id)}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      )
+      if (res.ok) {
+        const { available } = await res.json()
+        if (!available) {
+          setTitleError('Este nombre ya existe')
+        } else {
+          setTitleError('')
+        }
+      }
+    } catch {}
+  }
+
   const save = async () => {
-    const token = getToken()
-    setStatus('Guardando…')
+    if (!form.title.trim()) {
+      setTitleError('El nombre es requerido')
+      return
+    }
+    if (titleError) return
+
+    setStatus('Guardando...')
     const res = await fetch(`/api/v1/admin/artworks/${encodeURIComponent(id)}`, {
       method: 'PUT',
       headers: {
@@ -69,13 +100,18 @@ export default function ArtworkEditPage() {
       },
       body: JSON.stringify(form),
     })
+    if (res.status === 409) {
+      setTitleError('Este nombre ya existe')
+      setStatus('')
+      return
+    }
     if (!res.ok) {
       setStatus(`Error guardando: HTTP ${res.status}`)
       return
     }
     const updated = (await res.json()) as Artwork
     setArtwork(updated)
-    setStatus('Guardado ✓')
+    setStatus('Guardado!')
     setTimeout(() => setStatus(''), 2500)
   }
 
@@ -83,9 +119,8 @@ export default function ArtworkEditPage() {
     const files = e.target.files
     if (!files || files.length === 0) return
 
-    const token = getToken()
     setUploading(true)
-    setStatus('Subiendo imágenes…')
+    setStatus('Subiendo imagenes...')
 
     for (const file of Array.from(files)) {
       const formData = new FormData()
@@ -105,6 +140,10 @@ export default function ArtworkEditPage() {
         }
         const updated = (await res.json()) as Artwork
         setArtwork(updated)
+        // Update primary image in form if not set
+        if (!form.primaryImage && updated.images.length > 0) {
+          setForm((f) => ({ ...f, primaryImage: updated.primaryImage || updated.images[0] }))
+        }
       } catch (err) {
         setStatus(`Error subiendo: ${err}`)
         setUploading(false)
@@ -112,15 +151,14 @@ export default function ArtworkEditPage() {
       }
     }
 
-    setStatus('Imágenes subidas ✓')
+    setStatus('Imagenes subidas!')
     setUploading(false)
     setTimeout(() => setStatus(''), 2500)
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
   const handleDelete = async (filename: string, deleteFromDisk: boolean) => {
-    const token = getToken()
-    setStatus('Eliminando imagen…')
+    setStatus('Eliminando imagen...')
     setDeleteModal({ open: false, filename: '' })
 
     const url = `/api/v1/admin/artworks/${encodeURIComponent(id)}/images/${encodeURIComponent(filename)}${deleteFromDisk ? '?deleteFile=true' : ''}`
@@ -137,31 +175,59 @@ export default function ArtworkEditPage() {
 
     const updated = (await res.json()) as Artwork
     setArtwork(updated)
-    setStatus('Imagen eliminada ✓')
+
+    // Update primary image if deleted
+    if (form.primaryImage === filename) {
+      const newPrimary = updated.images.length > 0 ? updated.images[0] : ''
+      setForm((f) => ({ ...f, primaryImage: newPrimary }))
+    }
+
+    setStatus('Imagen eliminada!')
     setTimeout(() => setStatus(''), 2500)
+  }
+
+  const setPrimaryImage = (filename: string) => {
+    setForm((f) => ({ ...f, primaryImage: filename }))
   }
 
   return (
     <div className="container">
       <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-        <div>
-          <h1 style={{ margin: 0 }}>{artwork ? artwork.title : 'Cargando…'}</h1>
-          <div style={{ opacity: 0.7, fontSize: 12 }}>{id}</div>
+        <div style={{ flex: 1 }}>
+          <div style={{ opacity: 0.5, fontSize: 12, marginBottom: 4 }}>ID: {id}</div>
         </div>
         <div className="row" style={{ gap: 10, alignItems: 'center' }}>
           <Link className="btn" href="/artworks">
             Volver
           </Link>
-          <button className="btn btnPrimary" onClick={save}>
+          <button className="btn btn-primary" onClick={save} disabled={!!titleError}>
             Guardar
           </button>
         </div>
       </div>
 
-      {/* Galería de Imágenes */}
+      {/* Nombre editable */}
+      <div className="card" style={{ marginTop: 16, padding: 16 }}>
+        <label>Nombre de la obra</label>
+        <input
+          value={form.title}
+          onChange={(e) => {
+            setForm({ ...form, title: e.target.value })
+            setTitleError('')
+          }}
+          onBlur={() => checkTitleAvailability(form.title)}
+          placeholder="Nombre de la obra"
+          style={{ marginTop: 8, fontSize: 18, fontWeight: 600 }}
+        />
+        {titleError && (
+          <div style={{ color: '#ff6b6b', fontSize: 12, marginTop: 4 }}>{titleError}</div>
+        )}
+      </div>
+
+      {/* Galeria de Imagenes */}
       <div className="card" style={{ marginTop: 16, padding: 16 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-          <label style={{ margin: 0 }}>Imágenes ({artwork?.images?.length || 0})</label>
+          <label style={{ margin: 0 }}>Imagenes ({artwork?.images?.length || 0})</label>
           <div>
             <input
               ref={fileInputRef}
@@ -174,47 +240,83 @@ export default function ArtworkEditPage() {
             />
             <label
               htmlFor="image-upload"
-              className="btn btnPrimary"
+              className="btn btn-primary"
               style={{ cursor: uploading ? 'not-allowed' : 'pointer', opacity: uploading ? 0.6 : 1 }}
             >
-              {uploading ? 'Subiendo…' : 'Subir imágenes'}
+              {uploading ? 'Subiendo...' : 'Subir imagenes'}
             </label>
           </div>
         </div>
 
+        <div style={{ marginBottom: 12, fontSize: 12, opacity: 0.7 }}>
+          Haz clic en una imagen para seleccionarla como imagen principal
+        </div>
+
         {artwork?.images && artwork.images.length > 0 ? (
           <div className="imageGrid">
-            {artwork.images.map((img) => (
-              <div key={img} className="imageCard">
-                <img
-                  src={`/api/v1/artworks/${encodeURIComponent(id)}/images/${encodeURIComponent(img)}`}
-                  alt={img}
-                />
-                <button
-                  className="imageDeleteBtn"
-                  onClick={() => setDeleteModal({ open: true, filename: img })}
-                  title="Eliminar imagen"
+            {artwork.images.map((img) => {
+              const isPrimary = form.primaryImage === img
+              return (
+                <div
+                  key={img}
+                  className="imageCard"
+                  onClick={() => setPrimaryImage(img)}
+                  style={{
+                    cursor: 'pointer',
+                    border: isPrimary ? '3px solid #4CAF50' : '3px solid transparent',
+                    borderRadius: 8,
+                  }}
                 >
-                  ×
-                </button>
-                <div className="imageFilename">{img}</div>
-              </div>
-            ))}
+                  <img
+                    src={`/api/v1/artworks/${encodeURIComponent(id)}/images/${encodeURIComponent(img)}`}
+                    alt={img}
+                  />
+                  {isPrimary && (
+                    <div
+                      style={{
+                        position: 'absolute',
+                        top: 4,
+                        left: 4,
+                        background: '#4CAF50',
+                        color: 'white',
+                        fontSize: 10,
+                        padding: '2px 6px',
+                        borderRadius: 4,
+                        fontWeight: 600,
+                      }}
+                    >
+                      PRINCIPAL
+                    </div>
+                  )}
+                  <button
+                    className="imageDeleteBtn"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setDeleteModal({ open: true, filename: img })
+                    }}
+                    title="Eliminar imagen"
+                  >
+                    x
+                  </button>
+                  <div className="imageFilename">{img}</div>
+                </div>
+              )
+            })}
           </div>
         ) : (
           <div style={{ opacity: 0.5, padding: '20px 0', textAlign: 'center' }}>
-            No hay imágenes. Sube algunas para comenzar.
+            No hay imagenes. Sube algunas para comenzar.
           </div>
         )}
       </div>
 
-      {/* Modal de confirmación */}
+      {/* Modal de confirmacion */}
       {deleteModal.open && (
-        <div className="modalOverlay" onClick={() => setDeleteModal({ open: false, filename: '' })}>
+        <div className="modal-overlay" onClick={() => setDeleteModal({ open: false, filename: '' })}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <h3 style={{ marginTop: 0 }}>Eliminar imagen</h3>
             <p style={{ opacity: 0.8 }}>
-              ¿Qué deseas hacer con <strong>{deleteModal.filename}</strong>?
+              Que deseas hacer con <strong>{deleteModal.filename}</strong>?
             </p>
             <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
               <button
@@ -248,7 +350,7 @@ export default function ArtworkEditPage() {
 
         <div className="row">
           <div style={{ flex: 1, minWidth: 280 }}>
-            <label>Lugar donde se pintó</label>
+            <label>Lugar donde se pinto</label>
             <input
               value={form.paintedLocation}
               onChange={(e) => setForm({ ...form, paintedLocation: e.target.value })}
@@ -296,7 +398,7 @@ export default function ArtworkEditPage() {
         </div>
 
         <div style={{ marginTop: 16 }}>
-          <label>Detalle (explicación general)</label>
+          <label>Detalle (explicacion general)</label>
           <textarea
             value={form.detalle}
             onChange={(e) => setForm({ ...form, detalle: e.target.value })}
@@ -306,7 +408,7 @@ export default function ArtworkEditPage() {
         </div>
 
         <div style={{ marginTop: 16 }}>
-          <label>Bitácora</label>
+          <label>Bitacora</label>
           <textarea
             value={form.bitacora}
             onChange={(e) => setForm({ ...form, bitacora: e.target.value })}
@@ -318,5 +420,3 @@ export default function ArtworkEditPage() {
     </div>
   )
 }
-
-
