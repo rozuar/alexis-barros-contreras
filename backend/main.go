@@ -14,8 +14,8 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
-	"github.com/joho/godotenv"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/joho/godotenv"
 	"github.com/rs/cors"
 
 	"alexis-art-backend/db"
@@ -24,16 +24,16 @@ import (
 const maxUploadSize = 10 << 20 // 10MB
 
 type Artwork struct {
-	ID       string   `json:"id"`
-	Title    string   `json:"title"`
-	Images   []string `json:"images"`
-	Videos   []string `json:"videos,omitempty"`
-	Detalle  string   `json:"detalle,omitempty"`
-	PaintedLocation string `json:"paintedLocation,omitempty"`
-	StartDate       string `json:"startDate,omitempty"`
-	EndDate         string `json:"endDate,omitempty"`
-	InProgress      bool   `json:"inProgress,omitempty"`
-	Bitacora string   `json:"bitacora,omitempty"`
+	ID              string   `json:"id"`
+	Title           string   `json:"title"`
+	Images          []string `json:"images"`
+	Videos          []string `json:"videos,omitempty"`
+	Detalle         string   `json:"detalle,omitempty"`
+	PaintedLocation string   `json:"paintedLocation,omitempty"`
+	StartDate       string   `json:"startDate,omitempty"`
+	EndDate         string   `json:"endDate,omitempty"`
+	InProgress      bool     `json:"inProgress,omitempty"`
+	Bitacora        string   `json:"bitacora,omitempty"`
 }
 
 type artworkMeta struct {
@@ -64,6 +64,7 @@ type ErrorResponse struct {
 var artworksDir string
 var adminToken string
 var pgPool *pgxpool.Pool
+var s3Store *s3ArtworksStore
 
 func main() {
 	_ = godotenv.Load()
@@ -79,6 +80,17 @@ func main() {
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8090"
+	}
+
+	// Optional S3-compatible Object Storage (Railway bucket, etc.)
+	store, err := newS3ArtworksStoreFromEnv()
+	if err != nil {
+		log.Printf("Object storage init failed (continuing with disk): %v", err)
+	} else {
+		s3Store = store
+		if s3Store != nil {
+			log.Printf("Object storage enabled (bucket=%s)", s3Store.bucket)
+		}
 	}
 
 	// Optional Postgres
@@ -143,7 +155,7 @@ func healthCheck(w http.ResponseWriter, r *http.Request) {
 }
 
 func getArtworks(w http.ResponseWriter, r *http.Request) {
-	artworks, err := scanArtworks()
+	artworks, err := scanArtworks(r.Context())
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -162,7 +174,7 @@ func getArtwork(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	id := vars["id"]
 
-	artwork, err := getArtworkByID(id)
+	artwork, err := getArtworkByID(r.Context(), id)
 	if err != nil {
 		respondWithError(w, http.StatusNotFound, "Artwork not found")
 		return
@@ -177,8 +189,18 @@ func serveImage(w http.ResponseWriter, r *http.Request) {
 	id := vars["id"]
 	filename := vars["filename"]
 
+	if s3Store != nil {
+		u, err := s3Store.objectURL(r.Context(), id, filename)
+		if err != nil {
+			respondWithError(w, http.StatusBadRequest, "Invalid path")
+			return
+		}
+		http.Redirect(w, r, u, http.StatusTemporaryRedirect)
+		return
+	}
+
 	imagePath := filepath.Join(artworksDir, id, filename)
-	
+
 	// Security: ensure the path is within artworks directory
 	if !strings.HasPrefix(imagePath, artworksDir) {
 		respondWithError(w, http.StatusForbidden, "Invalid path")
@@ -212,8 +234,18 @@ func serveVideo(w http.ResponseWriter, r *http.Request) {
 	id := vars["id"]
 	filename := vars["filename"]
 
+	if s3Store != nil {
+		u, err := s3Store.objectURL(r.Context(), id, filename)
+		if err != nil {
+			respondWithError(w, http.StatusBadRequest, "Invalid path")
+			return
+		}
+		http.Redirect(w, r, u, http.StatusTemporaryRedirect)
+		return
+	}
+
 	videoPath := filepath.Join(artworksDir, id, filename)
-	
+
 	// Security: ensure the path is within artworks directory
 	if !strings.HasPrefix(videoPath, artworksDir) {
 		respondWithError(w, http.StatusForbidden, "Invalid path")
@@ -230,7 +262,10 @@ func serveVideo(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, videoPath)
 }
 
-func scanArtworks() ([]Artwork, error) {
+func scanArtworks(ctx context.Context) ([]Artwork, error) {
+	if s3Store != nil {
+		return s3Store.scanArtworks(ctx)
+	}
 	var artworks []Artwork
 
 	entries, err := os.ReadDir(artworksDir)
@@ -394,7 +429,7 @@ func isSafeArtworkID(id string) bool {
 }
 
 func adminListArtworks(w http.ResponseWriter, r *http.Request) {
-	artworks, err := scanArtworks()
+	artworks, err := scanArtworks(r.Context())
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -410,7 +445,7 @@ func adminGetArtwork(w http.ResponseWriter, r *http.Request) {
 		respondWithError(w, http.StatusBadRequest, "Invalid artwork id")
 		return
 	}
-	artwork, err := getArtworkByID(id)
+	artwork, err := getArtworkByID(r.Context(), id)
 	if err != nil {
 		respondWithError(w, http.StatusNotFound, "Artwork not found")
 		return
@@ -428,9 +463,16 @@ func adminUpsertArtwork(w http.ResponseWriter, r *http.Request) {
 	}
 
 	artworkPath := filepath.Join(artworksDir, id)
-	if _, err := os.Stat(artworkPath); os.IsNotExist(err) {
-		respondWithError(w, http.StatusNotFound, "Artwork not found")
-		return
+	if s3Store != nil {
+		if err := s3Store.ensureArtworkPrefixExists(r.Context(), id); err != nil {
+			respondWithError(w, http.StatusNotFound, "Artwork not found")
+			return
+		}
+	} else {
+		if _, err := os.Stat(artworkPath); os.IsNotExist(err) {
+			respondWithError(w, http.StatusNotFound, "Artwork not found")
+			return
+		}
 	}
 
 	var payload adminArtworkUpdate
@@ -446,26 +488,58 @@ func adminUpsertArtwork(w http.ResponseWriter, r *http.Request) {
 		InProgress:      payload.InProgress,
 	}
 	metaBytes, _ := json.MarshalIndent(meta, "", "  ")
-	if err := os.WriteFile(filepath.Join(artworkPath, "meta.json"), append(metaBytes, '\n'), 0644); err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Failed to write meta.json")
-		return
-	}
-
-	if strings.TrimSpace(payload.Detalle) == "" {
-		_ = os.Remove(filepath.Join(artworkPath, "detalle.txt"))
+	if s3Store != nil {
+		key := id + "/meta.json"
+		if err := s3Store.putObject(r.Context(), key, strings.NewReader(string(append(metaBytes, '\n'))), "application/json"); err != nil {
+			respondWithError(w, http.StatusInternalServerError, "Failed to write meta.json")
+			return
+		}
 	} else {
-		if err := os.WriteFile(filepath.Join(artworkPath, "detalle.txt"), []byte(payload.Detalle), 0644); err != nil {
-			respondWithError(w, http.StatusInternalServerError, "Failed to write detalle.txt")
+		if err := os.WriteFile(filepath.Join(artworkPath, "meta.json"), append(metaBytes, '\n'), 0644); err != nil {
+			respondWithError(w, http.StatusInternalServerError, "Failed to write meta.json")
 			return
 		}
 	}
 
-	if strings.TrimSpace(payload.Bitacora) == "" {
-		_ = os.Remove(filepath.Join(artworkPath, "bitacora.txt"))
+	if s3Store != nil {
+		key := id + "/detalle.txt"
+		if strings.TrimSpace(payload.Detalle) == "" {
+			_ = s3Store.deleteObject(r.Context(), key)
+		} else {
+			if err := s3Store.putObject(r.Context(), key, strings.NewReader(payload.Detalle), "text/plain; charset=utf-8"); err != nil {
+				respondWithError(w, http.StatusInternalServerError, "Failed to write detalle.txt")
+				return
+			}
+		}
 	} else {
-		if err := os.WriteFile(filepath.Join(artworkPath, "bitacora.txt"), []byte(payload.Bitacora), 0644); err != nil {
-			respondWithError(w, http.StatusInternalServerError, "Failed to write bitacora.txt")
-			return
+		if strings.TrimSpace(payload.Detalle) == "" {
+			_ = os.Remove(filepath.Join(artworkPath, "detalle.txt"))
+		} else {
+			if err := os.WriteFile(filepath.Join(artworkPath, "detalle.txt"), []byte(payload.Detalle), 0644); err != nil {
+				respondWithError(w, http.StatusInternalServerError, "Failed to write detalle.txt")
+				return
+			}
+		}
+	}
+
+	if s3Store != nil {
+		key := id + "/bitacora.txt"
+		if strings.TrimSpace(payload.Bitacora) == "" {
+			_ = s3Store.deleteObject(r.Context(), key)
+		} else {
+			if err := s3Store.putObject(r.Context(), key, strings.NewReader(payload.Bitacora), "text/plain; charset=utf-8"); err != nil {
+				respondWithError(w, http.StatusInternalServerError, "Failed to write bitacora.txt")
+				return
+			}
+		}
+	} else {
+		if strings.TrimSpace(payload.Bitacora) == "" {
+			_ = os.Remove(filepath.Join(artworkPath, "bitacora.txt"))
+		} else {
+			if err := os.WriteFile(filepath.Join(artworkPath, "bitacora.txt"), []byte(payload.Bitacora), 0644); err != nil {
+				respondWithError(w, http.StatusInternalServerError, "Failed to write bitacora.txt")
+				return
+			}
 		}
 	}
 
@@ -497,7 +571,7 @@ func adminUpsertArtwork(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	updated, err := getArtworkByID(id)
+	updated, err := getArtworkByID(r.Context(), id)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Failed to re-read artwork")
 		return
@@ -506,9 +580,12 @@ func adminUpsertArtwork(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(updated)
 }
 
-func getArtworkByID(id string) (Artwork, error) {
+func getArtworkByID(ctx context.Context, id string) (Artwork, error) {
+	if s3Store != nil {
+		return s3Store.scanArtwork(ctx, id)
+	}
 	artworkPath := filepath.Join(artworksDir, id)
-	
+
 	if _, err := os.Stat(artworkPath); os.IsNotExist(err) {
 		return Artwork{}, fmt.Errorf("artwork not found")
 	}
@@ -541,9 +618,16 @@ func adminUploadImage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	artworkPath := filepath.Join(artworksDir, id)
-	if _, err := os.Stat(artworkPath); os.IsNotExist(err) {
-		respondWithError(w, http.StatusNotFound, "Artwork not found")
-		return
+	if s3Store != nil {
+		if err := s3Store.ensureArtworkPrefixExists(r.Context(), id); err != nil {
+			respondWithError(w, http.StatusNotFound, "Artwork not found")
+			return
+		}
+	} else {
+		if _, err := os.Stat(artworkPath); os.IsNotExist(err) {
+			respondWithError(w, http.StatusNotFound, "Artwork not found")
+			return
+		}
 	}
 
 	// Limit upload size
@@ -574,23 +658,31 @@ func adminUploadImage(w http.ResponseWriter, r *http.Request) {
 	}
 	safeFilename := fmt.Sprintf("%d_%s%s", time.Now().UnixNano(), sanitizeFilename(header.Filename), ext)
 
-	// Save file
-	destPath := filepath.Join(artworkPath, safeFilename)
-	destFile, err := os.Create(destPath)
-	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Failed to save image")
-		return
-	}
-	defer destFile.Close()
+	if s3Store != nil {
+		key := id + "/" + safeFilename
+		if err := s3Store.putObject(r.Context(), key, file, contentType); err != nil {
+			respondWithError(w, http.StatusInternalServerError, "Failed to save image")
+			return
+		}
+	} else {
+		// Save file to disk
+		destPath := filepath.Join(artworkPath, safeFilename)
+		destFile, err := os.Create(destPath)
+		if err != nil {
+			respondWithError(w, http.StatusInternalServerError, "Failed to save image")
+			return
+		}
+		defer destFile.Close()
 
-	if _, err := io.Copy(destFile, file); err != nil {
-		os.Remove(destPath)
-		respondWithError(w, http.StatusInternalServerError, "Failed to save image")
-		return
+		if _, err := io.Copy(destFile, file); err != nil {
+			os.Remove(destPath)
+			respondWithError(w, http.StatusInternalServerError, "Failed to save image")
+			return
+		}
 	}
 
 	// Return updated artwork
-	updated, err := getArtworkByID(id)
+	updated, err := getArtworkByID(r.Context(), id)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Failed to re-read artwork")
 		return
@@ -618,32 +710,42 @@ func adminDeleteImage(w http.ResponseWriter, r *http.Request) {
 	artworkPath := filepath.Join(artworksDir, id)
 	imagePath := filepath.Join(artworkPath, filename)
 
-	// Security check
-	absArtworks, _ := filepath.Abs(artworksDir)
-	absImage, _ := filepath.Abs(imagePath)
-	if !strings.HasPrefix(absImage, absArtworks) {
-		respondWithError(w, http.StatusForbidden, "Invalid path")
-		return
-	}
+	if s3Store == nil {
+		// Security check
+		absArtworks, _ := filepath.Abs(artworksDir)
+		absImage, _ := filepath.Abs(imagePath)
+		if !strings.HasPrefix(absImage, absArtworks) {
+			respondWithError(w, http.StatusForbidden, "Invalid path")
+			return
+		}
 
-	// Check if file exists
-	if _, err := os.Stat(imagePath); os.IsNotExist(err) {
-		respondWithError(w, http.StatusNotFound, "Image not found")
-		return
+		// Check if file exists
+		if _, err := os.Stat(imagePath); os.IsNotExist(err) {
+			respondWithError(w, http.StatusNotFound, "Image not found")
+			return
+		}
 	}
 
 	// Check query param: deleteFile=true to actually delete from disk
 	deleteFromDisk := r.URL.Query().Get("deleteFile") == "true"
 
 	if deleteFromDisk {
-		if err := os.Remove(imagePath); err != nil {
-			respondWithError(w, http.StatusInternalServerError, "Failed to delete image")
-			return
+		if s3Store != nil {
+			key := id + "/" + filename
+			if err := s3Store.deleteObject(r.Context(), key); err != nil {
+				respondWithError(w, http.StatusInternalServerError, "Failed to delete image")
+				return
+			}
+		} else {
+			if err := os.Remove(imagePath); err != nil {
+				respondWithError(w, http.StatusInternalServerError, "Failed to delete image")
+				return
+			}
 		}
 	}
 
 	// Return updated artwork
-	updated, err := getArtworkByID(id)
+	updated, err := getArtworkByID(r.Context(), id)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Failed to re-read artwork")
 		return
@@ -698,4 +800,3 @@ func sanitizeFilename(filename string) string {
 	}
 	return s
 }
-

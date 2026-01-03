@@ -60,6 +60,14 @@ Health check endpoint.
 
 - `PORT`: Puerto del servidor (default: 8080)
 - `ARTWORKS_DIR`: Directorio donde están las obras (default: ../art)
+- `ARTWORKS_BUCKET`: **Si se define**, el backend usa Object Storage S3-compatible para leer/subir/borrar archivos (en vez de `ARTWORKS_DIR`).
+- `AWS_ACCESS_KEY_ID`: Access key del bucket (S3-compatible)
+- `AWS_SECRET_ACCESS_KEY`: Secret key del bucket (S3-compatible)
+- `AWS_REGION`: Región (default: `us-east-1`)
+- `AWS_REGION=auto`: el backend lo normaliza a `us-east-1` (compatibilidad con UIs que muestran "auto").
+- `AWS_ENDPOINT_URL_S3`: Endpoint S3-compatible (Railway Object Storage suele entregar uno). Alternativas soportadas: `S3_ENDPOINT`, `OBJECT_STORAGE_ENDPOINT`.
+- `ARTWORKS_PUBLIC_BASE_URL`: (opcional) Base URL pública del bucket para servir assets sin firmar. Si no se define, el backend usa URLs **presignadas**.
+- `ARTWORKS_PRESIGN_TTL_SECONDS`: (opcional) TTL de la URL presignada en segundos (default: 600).
 - `ADMIN_TOKEN`: Token para endpoints de administración (obligatorio para /api/v1/admin/*)
 - `DATABASE_URL`: Cadena de conexión Postgres (si se define, la app usa Postgres para meta/detalle/bitácora)
 
@@ -72,6 +80,22 @@ export ADMIN_TOKEN=cambia-esto-por-un-token-largo
 export DATABASE_URL="postgres://alexis:alexis_password@localhost:5433/alexis_art?sslmode=disable"
 go run .
 ```
+
+### Estructura esperada en el bucket (S3)
+
+Las llaves (keys) deben seguir el mismo layout que el filesystem:
+
+```
+<artwork-id>/<archivo>
+```
+
+Ejemplos:
+
+- `cisne/CZEvBMILM8w_2.jpg`
+- `aguila/DKS6SvEuSHd_1.mp4`
+- `a-la-espera/bitacora.txt`
+- `a-la-espera/detalle.txt`
+- `a-la-espera/meta.json`
 
 ## Endpoints Admin (Backoffice)
 

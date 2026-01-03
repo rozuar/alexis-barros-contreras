@@ -13,14 +13,14 @@ import (
 )
 
 type ArtworkRow struct {
-	ID             string
-	Title          string
+	ID              string
+	Title           string
 	PaintedLocation string
-	StartDate      *time.Time
-	EndDate        *time.Time
-	InProgress     bool
-	Detalle        string
-	Bitacora       string
+	StartDate       *time.Time
+	EndDate         *time.Time
+	InProgress      bool
+	Detalle         string
+	Bitacora        string
 }
 
 func Connect(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
@@ -119,5 +119,3 @@ func UpsertArtwork(ctx context.Context, pool *pgxpool.Pool, r ArtworkRow) error 
 	`, r.ID, r.Title, r.PaintedLocation, r.StartDate, r.EndDate, r.InProgress, r.Detalle, r.Bitacora)
 	return err
 }
-
-
