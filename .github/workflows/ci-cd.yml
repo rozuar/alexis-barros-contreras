@@ -1,0 +1,172 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  GO_VERSION: '1.23'
+  NODE_VERSION: '18'
+
+jobs:
+  # ============================================
+  # Backend Tests
+  # ============================================
+  test-backend:
+    name: Backend Tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: test
+          POSTGRES_USER: test
+          POSTGRES_DB: test_alexis_art
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Install dependencies
+        working-directory: ./backend
+        run: go mod download
+
+      - name: Run tests with coverage
+        working-directory: ./backend
+        run: go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
+        env:
+          DATABASE_URL: postgres://test:test@localhost:5432/test_alexis_art?sslmode=disable
+
+      - name: Check coverage threshold
+        working-directory: ./backend
+        run: |
+          COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
+          echo "Backend coverage: ${COVERAGE}%"
+          # Uncomment to enforce minimum coverage
+          # if (( $(echo "$COVERAGE < 50" | bc -l) )); then
+          #   echo "Coverage is below 50%"
+          #   exit 1
+          # fi
+
+      - name: Build backend
+        working-directory: ./backend
+        run: go build -o backend .
+
+  # ============================================
+  # Frontend Tests
+  # ============================================
+  test-frontend:
+    name: Frontend Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ./frontend
+        run: npm ci
+
+      - name: Run linter
+        working-directory: ./frontend
+        run: npm run lint
+
+      - name: Run tests with coverage
+        working-directory: ./frontend
+        run: npm run test:ci
+
+      - name: Build
+        working-directory: ./frontend
+        run: npm run build
+
+  # ============================================
+  # Backoffice Tests
+  # ============================================
+  test-backoffice:
+    name: Backoffice Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: backoffice/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ./backoffice
+        run: npm ci
+
+      - name: Run linter
+        working-directory: ./backoffice
+        run: npm run lint
+
+      - name: Run tests with coverage
+        working-directory: ./backoffice
+        run: npm run test:ci
+
+      - name: Build
+        working-directory: ./backoffice
+        run: npm run build
+
+  # ============================================
+  # Deploy to Railway (only on main)
+  # ============================================
+  deploy:
+    name: Deploy to Railway
+    needs: [test-backend, test-frontend, test-backoffice]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy Backend
+        run: railway up --service backend --detach
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+
+      - name: Deploy Frontend
+        run: railway up --service frontend --detach
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+
+      - name: Deploy Backoffice
+        run: railway up --service backoffice --detach
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+
+      - name: Deployment Summary
+        run: |
+          echo "## Deployment Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "All services deployed to Railway production." >> $GITHUB_STEP_SUMMARY
