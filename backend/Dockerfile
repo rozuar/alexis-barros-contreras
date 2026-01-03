@@ -26,17 +26,10 @@ RUN apk add --no-cache ca-certificates
 # Copy binary
 COPY --from=builder /out/backend /app/backend
 
-# Copy art folder as source for migration (Railway Volume will be at /app/art)
-COPY --from=builder /app/art /app/art-source
-
-# Copy migration script
-COPY scripts/migrate.sh /app/migrate.sh
-RUN chmod +x /app/migrate.sh
-
 EXPOSE 8090
 
 ENV PORT=8090
-ENV ARTWORKS_DIR=/app/art
 
-# Use migration script as entrypoint (migrates on first run, then starts backend)
-CMD ["/app/migrate.sh"]
+# Images are stored in Railway Object Storage (bucket)
+# No local art folder needed when using S3 mode
+CMD ["/app/backend"]
