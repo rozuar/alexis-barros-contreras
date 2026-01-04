@@ -144,26 +144,31 @@ jobs:
     needs: [test-backend, test-frontend, test-backoffice]
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    env:
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Railway CLI
         run: npm install -g @railway/cli
 
+      - name: Link Railway project (optional)
+        run: |
+          if [ -n "${RAILWAY_PROJECT_ID}" ]; then
+            railway link -p "${RAILWAY_PROJECT_ID}"
+          else
+            echo "RAILWAY_PROJECT_ID not set; skipping railway link (project token may still work)"
+          fi
+
       - name: Deploy Backend
         run: railway up --service backend --detach
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
 
       - name: Deploy Frontend
         run: railway up --service frontend --detach
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
 
       - name: Deploy Backoffice
         run: railway up --service backoffice --detach
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
 
       - name: Deployment Summary
         run: |

@@ -42,13 +42,18 @@ Push to main → Tests + Coverage → Build → Deploy to Railway
 Configure in GitHub Repository → Settings → Secrets:
 
 ```
-RAILWAY_TOKEN=your_railway_api_token
+RAILWAY_TOKEN=your_railway_project_token
+RAILWAY_PROJECT_ID=your_railway_project_id (optional but recommended)
 ```
 
 To get a Railway token:
-1. Go to Railway Dashboard → Account Settings → Tokens
-2. Create a new token with project access
-3. Add it as a GitHub secret
+1. Go to Railway Dashboard → **Project** → Settings → Tokens
+2. Create a **Project Token**
+3. Add it as GitHub secret `RAILWAY_TOKEN`
+
+To get the Project ID (optional):
+1. Railway Dashboard → Project → Settings → General (Project ID)
+2. Add it as GitHub secret `RAILWAY_PROJECT_ID`
 
 ## Environment Variables (Railway)
 
