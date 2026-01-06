@@ -14,6 +14,9 @@ export default function ArtworksPage() {
   const [newTitle, setNewTitle] = useState('')
   const [titleError, setTitleError] = useState('')
   const [creating, setCreating] = useState(false)
+  const [showDeleteModal, setShowDeleteModal] = useState(false)
+  const [artworkToDelete, setArtworkToDelete] = useState<{ id: string; title: string } | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   const token = getToken()
 
@@ -82,6 +85,27 @@ export default function ArtworksPage() {
     }
   }
 
+  async function handleDelete() {
+    if (!artworkToDelete) return
+    setDeleting(true)
+    try {
+      const res = await fetch(`/api/v1/admin/artworks/${encodeURIComponent(artworkToDelete.id)}`, {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      setShowDeleteModal(false)
+      setArtworkToDelete(null)
+      await loadArtworks()
+    } catch (e: any) {
+      setError(e?.message || 'Error al eliminar')
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   function getImageUrl(artwork: { id: string; primaryImage?: string; images: string[] }) {
     const img = artwork.primaryImage || artwork.images[0]
     if (!img) return null
@@ -122,54 +146,74 @@ export default function ArtworksPage() {
               {data.artworks.map((a) => {
                 const imgUrl = getImageUrl(a)
                 return (
-                  <Link
+                  <div
                     key={a.id}
-                    href={`/artworks/${encodeURIComponent(a.id)}`}
                     className="card"
                     style={{ padding: 12, display: 'flex', gap: 12, alignItems: 'center' }}
                   >
-                    <div
+                    <Link
+                      href={`/artworks/${encodeURIComponent(a.id)}`}
+                      style={{ display: 'flex', gap: 12, alignItems: 'center', flex: 1, minWidth: 0 }}
+                    >
+                      <div
+                        style={{
+                          width: 60,
+                          height: 60,
+                          borderRadius: 6,
+                          overflow: 'hidden',
+                          backgroundColor: '#1a1a1a',
+                          flexShrink: 0,
+                        }}
+                      >
+                        {imgUrl ? (
+                          <img
+                            src={imgUrl}
+                            alt={a.title}
+                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                          />
+                        ) : (
+                          <div
+                            style={{
+                              width: '100%',
+                              height: '100%',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              color: 'rgba(255,255,255,0.3)',
+                              fontSize: 10,
+                            }}
+                          >
+                            Sin imagen
+                          </div>
+                        )}
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 600 }}>{a.title}</div>
+                        <div style={{ opacity: 0.5, fontSize: 12 }}>
+                          {a.startDate || 'Sin fecha'}
+                        </div>
+                      </div>
+                      <div style={{ opacity: 0.7, fontSize: 12, flexShrink: 0 }}>
+                        {a.inProgress ? 'EN PROGRESO' : a.endDate || ''}
+                      </div>
+                    </Link>
+                    <button
+                      className="btn"
+                      onClick={() => {
+                        setArtworkToDelete({ id: a.id, title: a.title })
+                        setShowDeleteModal(true)
+                      }}
                       style={{
-                        width: 60,
-                        height: 60,
-                        borderRadius: 6,
-                        overflow: 'hidden',
-                        backgroundColor: '#1a1a1a',
+                        backgroundColor: '#dc3545',
+                        color: 'white',
+                        padding: '8px 12px',
+                        fontSize: 14,
                         flexShrink: 0,
                       }}
                     >
-                      {imgUrl ? (
-                        <img
-                          src={imgUrl}
-                          alt={a.title}
-                          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                        />
-                      ) : (
-                        <div
-                          style={{
-                            width: '100%',
-                            height: '100%',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            color: 'rgba(255,255,255,0.3)',
-                            fontSize: 10,
-                          }}
-                        >
-                          Sin imagen
-                        </div>
-                      )}
-                    </div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontWeight: 600 }}>{a.title}</div>
-                      <div style={{ opacity: 0.5, fontSize: 12 }}>
-                        {a.startDate || 'Sin fecha'}
-                      </div>
-                    </div>
-                    <div style={{ opacity: 0.7, fontSize: 12, flexShrink: 0 }}>
-                      {a.inProgress ? 'EN PROGRESO' : a.endDate || ''}
-                    </div>
-                  </Link>
+                      Eliminar
+                    </button>
+                  </div>
                 )
               })}
             </div>
@@ -208,6 +252,43 @@ export default function ArtworksPage() {
                 disabled={!newTitle.trim() || !!titleError || creating}
               >
                 {creating ? 'Creando...' : 'Crear'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showDeleteModal && artworkToDelete && (
+        <div className="modal-overlay" onClick={() => setShowDeleteModal(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h2 style={{ marginTop: 0, marginBottom: 16 }}>Confirmar eliminación</h2>
+            <p style={{ marginBottom: 16 }}>
+              ¿Estás seguro de que deseas eliminar la obra <strong>{artworkToDelete.title}</strong>?
+            </p>
+            <p style={{ marginBottom: 16, color: '#ff6b6b', fontSize: 14 }}>
+              Esta acción no se puede deshacer.
+            </p>
+            <div className="row" style={{ marginTop: 16, justifyContent: 'flex-end', gap: 8 }}>
+              <button
+                className="btn"
+                onClick={() => {
+                  setShowDeleteModal(false)
+                  setArtworkToDelete(null)
+                }}
+                disabled={deleting}
+              >
+                Cancelar
+              </button>
+              <button
+                className="btn"
+                onClick={handleDelete}
+                disabled={deleting}
+                style={{
+                  backgroundColor: '#dc3545',
+                  color: 'white',
+                }}
+              >
+                {deleting ? 'Eliminando...' : 'Eliminar'}
               </button>
             </div>
           </div>
