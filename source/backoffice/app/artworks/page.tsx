@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { clearToken, getToken } from '@/lib/auth'
 import type { ArtworkListResponse } from '@/lib/api'
@@ -20,15 +20,7 @@ export default function ArtworksPage() {
 
   const token = getToken()
 
-  useEffect(() => {
-    if (!token) {
-      router.replace('/login')
-      return
-    }
-    loadArtworks()
-  }, [router, token])
-
-  async function loadArtworks() {
+  const loadArtworks = useCallback(async () => {
     try {
       const res = await fetch('/api/v1/admin/artworks', {
         headers: { Authorization: `Bearer ${token}` },
@@ -39,7 +31,15 @@ export default function ArtworksPage() {
     } catch (e: any) {
       setError(e?.message || 'Error')
     }
-  }
+  }, [token])
+
+  useEffect(() => {
+    if (!token) {
+      router.replace('/login')
+      return
+    }
+    loadArtworks()
+  }, [router, token, loadArtworks])
 
   async function checkTitleAvailability(title: string) {
     if (!title.trim()) return

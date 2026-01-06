@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { getToken } from '@/lib/auth'
@@ -33,15 +33,7 @@ export default function ArtworkEditPage() {
 
   const token = getToken()
 
-  useEffect(() => {
-    if (!token) {
-      router.replace('/login')
-      return
-    }
-    loadArtwork()
-  }, [id, router, token])
-
-  const loadArtwork = async () => {
+  const loadArtwork = useCallback(async () => {
     const res = await fetch(`/api/v1/admin/artworks/${encodeURIComponent(id)}`, {
       headers: { Authorization: `Bearer ${token}` },
     })
@@ -61,7 +53,15 @@ export default function ArtworkEditPage() {
       bitacora: a.bitacora || '',
       primaryImage: a.primaryImage || '',
     })
-  }
+  }, [id, token])
+
+  useEffect(() => {
+    if (!token) {
+      router.replace('/login')
+      return
+    }
+    loadArtwork()
+  }, [router, token, loadArtwork])
 
   const checkTitleAvailability = async (title: string) => {
     if (!title.trim()) {
