@@ -31,6 +31,12 @@ BACKEND_URL=http://localhost:8090 npm run dev
 
 Abre `http://localhost:3011`.
 
+## Deploy en Railway (importante)
+
+En Railway, **NO** uses `localhost`. Configura en el servicio `backoffice`:
+
+- `BACKEND_URL=http://backend.railway.internal:8090`
+
 ## Qué guarda el backoffice
 
 En cada carpeta de obra (ej. `art/niña-lobos/`):

@@ -33,12 +33,29 @@ async function proxy(req: NextRequest, params: { path: string[] }) {
     body = await req.arrayBuffer()
   }
 
-  const upstream = await fetch(target, {
-    method: req.method,
-    headers,
-    body,
-    redirect: 'manual',
-  })
+  let upstream: Response
+  try {
+    upstream = await fetch(target, {
+      method: req.method,
+      headers,
+      body,
+      redirect: 'manual',
+    })
+  } catch (err: any) {
+    // Avoid crashing the route handler (which becomes a 500 in Next.js).
+    // Most common cause in Railway is BACKEND_URL missing/incorrect.
+    const backendURL = process.env.BACKEND_URL?.trim() || 'http://localhost:8090'
+    return new Response(
+      JSON.stringify({
+        error: 'Upstream backend unreachable',
+        backendURL,
+      }),
+      {
+        status: 502,
+        headers: { 'content-type': 'application/json; charset=utf-8' },
+      },
+    )
+  }
 
   const outHeaders = new Headers(upstream.headers)
   outHeaders.delete('content-encoding')

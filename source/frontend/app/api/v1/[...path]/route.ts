@@ -25,11 +25,26 @@ function forwardHeaders(req: NextRequest): Headers {
 
 async function proxy(req: NextRequest, params: { path: string[] }) {
   const target = buildTargetURL(req, params.path)
-  const upstream = await fetch(target, {
-    method: req.method,
-    headers: forwardHeaders(req),
-    redirect: 'manual',
-  })
+  let upstream: Response
+  try {
+    upstream = await fetch(target, {
+      method: req.method,
+      headers: forwardHeaders(req),
+      redirect: 'manual',
+    })
+  } catch (err: any) {
+    const backendURL = process.env.BACKEND_URL?.trim() || 'http://localhost:8090'
+    return new Response(
+      JSON.stringify({
+        error: 'Upstream backend unreachable',
+        backendURL,
+      }),
+      {
+        status: 502,
+        headers: { 'content-type': 'application/json; charset=utf-8' },
+      },
+    )
+  }
 
   const headers = new Headers(upstream.headers)
   headers.delete('content-encoding')
