@@ -26,6 +26,8 @@ function forwardHeaders(req: NextRequest): Headers {
 async function proxy(req: NextRequest, params: { path: string[] }) {
   const target = buildTargetURL(req, params.path)
   const headers = forwardHeaders(req)
+  const pathStr = params.path.join('/')
+  const shouldLog = pathStr.startsWith('admin/artworks')
 
   // For PUT/POST/PATCH we need to forward the body.
   let body: ArrayBuffer | undefined
@@ -35,6 +37,9 @@ async function proxy(req: NextRequest, params: { path: string[] }) {
 
   let upstream: Response
   try {
+    if (shouldLog) {
+      console.log('[backoffice-proxy]', req.method, '/api/v1/' + pathStr, '->', target.toString())
+    }
     upstream = await fetch(target, {
       method: req.method,
       headers,
@@ -55,6 +60,10 @@ async function proxy(req: NextRequest, params: { path: string[] }) {
         headers: { 'content-type': 'application/json; charset=utf-8' },
       },
     )
+  }
+
+  if (shouldLog && !upstream.ok) {
+    console.log('[backoffice-proxy]', 'upstream status', upstream.status, '/api/v1/' + pathStr)
   }
 
   const outHeaders = new Headers(upstream.headers)

@@ -89,13 +89,22 @@ export default function ArtworksPage() {
     if (!artworkToDelete) return
     setDeleting(true)
     try {
+      setError('')
+      console.log('[backoffice] deleting artwork', { id: artworkToDelete.id })
       const res = await fetch(`/api/v1/admin/artworks/${encodeURIComponent(artworkToDelete.id)}`, {
         method: 'DELETE',
         headers: {
           Authorization: `Bearer ${token}`,
         },
       })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      if (!res.ok) {
+        let detail = ''
+        try {
+          const ct = res.headers.get('content-type') || ''
+          detail = ct.includes('application/json') ? JSON.stringify(await res.json()) : await res.text()
+        } catch {}
+        throw new Error(`HTTP ${res.status}${detail ? ` - ${detail}` : ''}`)
+      }
       setShowDeleteModal(false)
       setArtworkToDelete(null)
       await loadArtworks()
@@ -199,7 +208,9 @@ export default function ArtworksPage() {
                     </Link>
                     <button
                       className="btn"
-                      onClick={() => {
+                      onClick={(e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
                         setArtworkToDelete({ id: a.id, title: a.title })
                         setShowDeleteModal(true)
                       }}
