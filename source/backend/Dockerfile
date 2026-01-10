@@ -29,6 +29,9 @@ RUN apk add --no-cache ca-certificates
 # Copy binary
 COPY --from=builder /out/backend /app/backend
 
+# Copy migrations for DB bootstrap (used by ./db/migrations at runtime)
+COPY --from=builder /app/db/migrations /app/db/migrations
+
 EXPOSE 8090
 
 ENV PORT=8090

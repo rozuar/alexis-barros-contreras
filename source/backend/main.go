@@ -102,16 +102,19 @@ func main() {
 		}
 	}
 
-	// Optional Postgres
+	// Optional Postgres (keep startup fast: bound connect/migrate time)
 	if databaseURL := os.Getenv("DATABASE_URL"); strings.TrimSpace(databaseURL) != "" {
-		ctx := context.Background()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
 		pool, err := db.Connect(ctx, databaseURL)
 		if err != nil {
 			log.Printf("Postgres connect failed (continuing without DB): %v", err)
 			pool = nil
 		}
 		if pool != nil {
-			if err := db.Migrate(ctx, pool, "./db/migrations"); err != nil {
+			mCtx, mCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer mCancel()
+			if err := db.Migrate(mCtx, pool, "./db/migrations"); err != nil {
 				log.Printf("Postgres migrate failed (continuing without DB): %v", err)
 				pool.Close()
 				pool = nil
@@ -129,8 +132,8 @@ func main() {
 	api := r.PathPrefix("/api/v1").Subrouter()
 	api.HandleFunc("/artworks", getArtworks).Methods("GET")
 	api.HandleFunc("/artworks/{id}", getArtwork).Methods("GET")
-	api.HandleFunc("/artworks/{id}/images/{filename}", serveImage).Methods("GET")
-	api.HandleFunc("/artworks/{id}/videos/{filename}", serveVideo).Methods("GET")
+	api.HandleFunc("/artworks/{id}/images/{filename}", serveImage).Methods("GET", "HEAD")
+	api.HandleFunc("/artworks/{id}/videos/{filename}", serveVideo).Methods("GET", "HEAD")
 
 	// Admin API (token required)
 	admin := api.PathPrefix("/admin").Subrouter()
