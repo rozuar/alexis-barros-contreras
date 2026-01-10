@@ -145,6 +145,8 @@ func main() {
 
 	// Health check
 	r.HandleFunc("/health", healthCheck).Methods("GET")
+	// Root: convenient landing endpoint for Railway public domain
+	r.HandleFunc("/", rootInfo).Methods("GET")
 
 	// CORS configuration
 	c := cors.New(cors.Options{
@@ -158,6 +160,18 @@ func main() {
 	log.Printf("Server starting on port %s", port)
 	log.Printf("Artworks directory: %s", artworksDir)
 	log.Fatal(http.ListenAndServe(":"+port, handler))
+}
+
+func rootInfo(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"service": "alexis-art-backend",
+		"status":  "ok",
+		"routes": map[string]string{
+			"health":   "/health",
+			"artworks": "/api/v1/artworks",
+		},
+	})
 }
 
 func healthCheck(w http.ResponseWriter, r *http.Request) {
