@@ -146,7 +146,7 @@ func main() {
 	// Health check
 	r.HandleFunc("/health", healthCheck).Methods("GET")
 	// Root: convenient landing endpoint for Railway public domain
-	r.HandleFunc("/", rootInfo).Methods("GET")
+	r.HandleFunc("/", rootInfo).Methods("GET", "HEAD")
 
 	// CORS configuration
 	c := cors.New(cors.Options{
