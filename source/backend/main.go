@@ -635,11 +635,6 @@ func adminGetArtwork(w http.ResponseWriter, r *http.Request) {
 }
 
 func adminDeleteArtwork(w http.ResponseWriter, r *http.Request) {
-	if pgPool == nil {
-		respondWithError(w, http.StatusInternalServerError, "Database not configured")
-		return
-	}
-
 	vars := mux.Vars(r)
 	id := vars["id"]
 	if !isSafeArtworkID(id) {
@@ -650,15 +645,18 @@ func adminDeleteArtwork(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 
-	// Ensure artwork exists in DB
-	row, err := db.GetArtwork(ctx, pgPool, id)
-	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Failed to read artwork")
-		return
-	}
-	if row == nil {
-		respondWithError(w, http.StatusNotFound, "Artwork not found")
-		return
+	// Ensure artwork exists in storage (bucket/disk). DB rows may not exist for legacy folders.
+	if s3Store != nil {
+		if err := s3Store.ensureArtworkPrefixExists(ctx, id); err != nil {
+			respondWithError(w, http.StatusNotFound, "Artwork not found")
+			return
+		}
+	} else {
+		artworkPath := filepath.Join(artworksDir, id)
+		if _, err := os.Stat(artworkPath); os.IsNotExist(err) {
+			respondWithError(w, http.StatusNotFound, "Artwork not found")
+			return
+		}
 	}
 
 	// Delete storage first (so if this fails, we keep the DB row and can retry safely).
@@ -672,14 +670,9 @@ func adminDeleteArtwork(w http.ResponseWriter, r *http.Request) {
 		_ = os.RemoveAll(filepath.Join(artworksDir, id))
 	}
 
-	deleted, err := db.DeleteArtwork(ctx, pgPool, id)
-	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Failed to delete artwork")
-		return
-	}
-	if !deleted {
-		respondWithError(w, http.StatusNotFound, "Artwork not found")
-		return
+	// Best-effort DB cleanup (optional)
+	if pgPool != nil {
+		_, _ = db.DeleteArtwork(ctx, pgPool, id)
 	}
 
 	w.WriteHeader(http.StatusNoContent)
