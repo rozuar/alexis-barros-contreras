@@ -18,6 +18,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 
 	"alexis-art-backend/db"
 )
@@ -390,4 +391,57 @@ func (s *s3ArtworksStore) ensureArtworkPrefixExists(ctx context.Context, id stri
 		return fmt.Errorf("artwork not found")
 	}
 	return nil
+}
+
+func (s *s3ArtworksStore) deletePrefix(ctx context.Context, prefix string) error {
+	prefix = strings.TrimPrefix(prefix, "/")
+	if prefix == "" {
+		return errors.New("prefix is required")
+	}
+
+	var token *string
+	batch := make([]types.ObjectIdentifier, 0, 1000)
+
+	flush := func() error {
+		if len(batch) == 0 {
+			return nil
+		}
+		_, err := s.client.DeleteObjects(ctx, &s3.DeleteObjectsInput{
+			Bucket: aws.String(s.bucket),
+			Delete: &types.Delete{Objects: batch, Quiet: aws.Bool(true)},
+		})
+		batch = batch[:0]
+		return err
+	}
+
+	for {
+		out, err := s.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+			Bucket:            aws.String(s.bucket),
+			Prefix:            aws.String(prefix),
+			ContinuationToken: token,
+		})
+		if err != nil {
+			return err
+		}
+
+		for _, obj := range out.Contents {
+			if obj.Key == nil {
+				continue
+			}
+			batch = append(batch, types.ObjectIdentifier{Key: obj.Key})
+			if len(batch) >= 1000 {
+				if err := flush(); err != nil {
+					return err
+				}
+			}
+		}
+
+		if aws.ToBool(out.IsTruncated) && out.NextContinuationToken != nil {
+			token = out.NextContinuationToken
+			continue
+		}
+		break
+	}
+
+	return flush()
 }

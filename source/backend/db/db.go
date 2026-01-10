@@ -166,3 +166,12 @@ func ListArtworks(ctx context.Context, pool *pgxpool.Pool) ([]ArtworkRow, error)
 	}
 	return result, rows.Err()
 }
+
+// DeleteArtwork deletes an artwork row by id. Returns true if a row was deleted.
+func DeleteArtwork(ctx context.Context, pool *pgxpool.Pool, id string) (bool, error) {
+	cmd, err := pool.Exec(ctx, `DELETE FROM artworks WHERE id=$1`, id)
+	if err != nil {
+		return false, err
+	}
+	return cmd.RowsAffected() > 0, nil
+}

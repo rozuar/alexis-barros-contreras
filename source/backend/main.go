@@ -139,6 +139,7 @@ func main() {
 	admin.HandleFunc("/artworks", adminCreateArtwork).Methods("POST")
 	admin.HandleFunc("/artworks/{id}", adminGetArtwork).Methods("GET")
 	admin.HandleFunc("/artworks/{id}", adminUpsertArtwork).Methods("PUT")
+	admin.HandleFunc("/artworks/{id}", adminDeleteArtwork).Methods("DELETE")
 	admin.HandleFunc("/artworks/{id}/images", adminUploadImage).Methods("POST")
 	admin.HandleFunc("/artworks/{id}/images/{filename}", adminDeleteImage).Methods("DELETE")
 	admin.HandleFunc("/artworks/check-title", adminCheckTitle).Methods("GET")
@@ -610,6 +611,57 @@ func adminGetArtwork(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(artwork)
+}
+
+func adminDeleteArtwork(w http.ResponseWriter, r *http.Request) {
+	if pgPool == nil {
+		respondWithError(w, http.StatusInternalServerError, "Database not configured")
+		return
+	}
+
+	vars := mux.Vars(r)
+	id := vars["id"]
+	if !isSafeArtworkID(id) {
+		respondWithError(w, http.StatusBadRequest, "Invalid artwork id")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	// Ensure artwork exists in DB
+	row, err := db.GetArtwork(ctx, pgPool, id)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to read artwork")
+		return
+	}
+	if row == nil {
+		respondWithError(w, http.StatusNotFound, "Artwork not found")
+		return
+	}
+
+	// Delete storage first (so if this fails, we keep the DB row and can retry safely).
+	if s3Store != nil {
+		// Remove everything under <id>/
+		if err := s3Store.deletePrefix(ctx, id+"/"); err != nil {
+			respondWithError(w, http.StatusInternalServerError, "Failed to delete artwork files")
+			return
+		}
+	} else {
+		_ = os.RemoveAll(filepath.Join(artworksDir, id))
+	}
+
+	deleted, err := db.DeleteArtwork(ctx, pgPool, id)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to delete artwork")
+		return
+	}
+	if !deleted {
+		respondWithError(w, http.StatusNotFound, "Artwork not found")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func adminUpsertArtwork(w http.ResponseWriter, r *http.Request) {
