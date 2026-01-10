@@ -9,7 +9,9 @@
 5. [Editar Obra](#5-editar-obra)
 6. [Gestion de Imagenes](#6-gestion-de-imagenes)
 7. [Campos del Formulario](#7-campos-del-formulario)
-8. [Preguntas Frecuentes](#8-preguntas-frecuentes)
+8. [Eliminar Obras](#8-eliminar-obras)
+9. [Configuracion (Railway y local)](#9-configuracion-railway-y-local)
+10. [Preguntas Frecuentes](#10-preguntas-frecuentes)
 
 ---
 
@@ -17,11 +19,12 @@
 
 El Backoffice de Alexis Art es un panel de administracion que permite gestionar el portafolio de obras de arte. Desde aqui puedes:
 
-- Ver todas las obras registradas
-- Crear nuevas obras
-- Editar metadatos de obras existentes
-- Subir y eliminar imagenes
-- Gestionar bitacoras y descripciones
+- Ver todas las obras registradas (con orden y filtros visuales)
+- Crear nuevas obras (con validacion de nombre unico)
+- Editar metadatos de obras existentes (titulo, fechas, estado, etc.)
+- Subir imagenes, definir imagen principal y eliminar imagenes
+- Editar detalle y bitacora
+- Eliminar obras completas (incluye archivos en servidor/bucket)
 
 ---
 
@@ -72,6 +75,14 @@ Cada obra se muestra como una tarjeta con:
 - **Fecha:** Rango de fechas de creacion
 - **Estado:** Indicador "En progreso" si la obra no esta terminada
 
+### 3.3 Orden del listado
+
+El listado se ordena automaticamente asi:
+
+1. Obras **en progreso** primero (`inProgress = true`)
+2. Luego por **fecha de inicio** (descendente)
+3. Si no hay fecha, por **titulo** (alfabetico ascendente)
+
 ### 3.3 Acceder a una Obra
 
 Haz clic en cualquier tarjeta de obra para abrir el editor y ver/modificar sus detalles.
@@ -95,7 +106,7 @@ Haz clic en cualquier tarjeta de obra para abrir el editor y ver/modificar sus d
 
 1. Una vez que el nombre sea valido, haz clic en **"Crear"**
 2. La obra se creara y seras redirigido al editor
-3. El nombre puede quedar vacio inicialmente (se puede completar despues)
+3. El nombre es **obligatorio** para crear la obra
 
 ### 4.4 Cancelar
 
@@ -154,7 +165,7 @@ La imagen principal es la que se muestra como miniatura en el listado y como por
 
 1. En la galeria, haz clic sobre la imagen que deseas como principal
 2. La imagen seleccionada se marcara con un borde destacado
-3. Guarda los cambios para confirmar
+3. Guarda los cambios para confirmar (queda guardado como `primaryImage`)
 
 ### 6.3 Eliminar Imagenes
 
@@ -163,8 +174,7 @@ La imagen principal es la que se muestra como miniatura en el listado y como por
 3. Confirma la eliminacion en el dialogo
 
 **Opciones de eliminacion:**
-- **Solo remover de la entrada:** Desvincula la imagen de la obra pero no la borra del servidor
-- **Eliminar del servidor:** Borra la imagen permanentemente
+- **Eliminar del servidor/bucket:** Borra la imagen permanentemente y desaparece de la galeria
 
 > **Advertencia:** La eliminacion del servidor es permanente y no se puede deshacer.
 
@@ -176,7 +186,7 @@ La imagen principal es la que se muestra como miniatura en el listado y como por
 
 - **Descripcion:** Nombre unico de la obra
 - **Validacion:** No puede repetirse con otra obra existente
-- **Obligatorio:** No (puede estar vacio temporalmente)
+- **Obligatorio:** Si (para guardar cambios)
 
 ### 7.2 Lugar de Pintado
 
@@ -217,13 +227,57 @@ La imagen principal es la que se muestra como miniatura en el listado y como por
 - **Formato:** Texto plano (area de texto grande)
 - **Obligatorio:** No
 
+### 7.8 Imagen Principal
+
+- **Descripcion:** Nombre de archivo de la imagen principal (`primaryImage`)
+- **Uso:** Determina la miniatura del listado y la portada en el sitio publico
+- **Recomendacion:** Selecciona una imagen representativa y guarda
+
 ---
 
-## 8. Preguntas Frecuentes
+## 8. Eliminar Obras
+
+Desde el listado puedes eliminar una obra completa:
+
+1. En la tarjeta de la obra, haz clic en **"Eliminar"**
+2. Aparece un modal de confirmacion
+3. Confirma la eliminacion
+
+**Que elimina el sistema:**
+
+- Archivos de la obra en servidor/bucket (carpeta/prefijo `<id>/...`)
+- Registro en base de datos (si existe)
+
+> **Advertencia:** Esta accion es permanente y no se puede deshacer.
+
+---
+
+## 9. Configuracion (Railway y local)
+
+### 9.1 Variables requeridas en Backend (Railway)
+
+- `ADMIN_TOKEN`: token real del backend para endpoints admin
+- `DATABASE_URL`: Postgres (Railway)
+
+### 9.2 Variables requeridas en Backoffice (Railway)
+
+- `BACKEND_URL=http://backend.railway.internal:8090`
+- `NEXT_PUBLIC_ADMIN_TOKEN`: debe ser **exactamente el mismo valor** que `ADMIN_TOKEN` del backend
+
+> Si `NEXT_PUBLIC_ADMIN_TOKEN` no coincide con `ADMIN_TOKEN`, las acciones admin (crear/editar/eliminar/subir) responderan 401.
+
+### 9.3 Variables en local (dev)
+
+- Backend: `ADMIN_TOKEN`, `DATABASE_URL`
+- Backoffice: `BACKEND_URL=http://localhost:8090`
+
+---
+
+## 10. Preguntas Frecuentes
 
 ### ¿Por que no puedo guardar el nombre de la obra?
 
-El nombre debe ser unico. Si ves un error de validacion, significa que ya existe otra obra con ese nombre. Intenta con un nombre diferente.
+El nombre debe ser **unico** y es **obligatorio**. Si ves un error de validacion, significa que ya existe otra obra con ese nombre. Intenta con un nombre diferente.
 
 ### ¿Cuantas imagenes puedo subir por obra?
 
@@ -254,6 +308,14 @@ No. La eliminacion del servidor es permanente. Solo usa esta opcion si estas seg
 ### Mi sesion expiro, ¿que hago?
 
 Simplemente vuelve a iniciar sesion con tus credenciales en la pagina de login.
+
+### Al intentar eliminar/crear/editar me sale 401/502
+
+- **401 Unauthorized**: el token no coincide. En Railway asegurate de:
+  - `ADMIN_TOKEN` en backend
+  - `NEXT_PUBLIC_ADMIN_TOKEN` en backoffice (mismo valor)
+- **502 Upstream backend unreachable**: backoffice no puede llegar al backend:
+  - `BACKEND_URL=http://backend.railway.internal:8090`
 
 ---
 
