@@ -187,6 +187,8 @@ func getArtworks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	sortArtworksForWeb(artworks)
+
 	response := ArtworkListResponse{
 		Artworks: artworks,
 		Total:    len(artworks),
@@ -469,26 +471,45 @@ func adminListArtworks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Sort by start_date DESC (nulls last), then by title ASC
-	sort.Slice(artworks, func(i, j int) bool {
-		// Both have dates
-		if artworks[i].StartDate != "" && artworks[j].StartDate != "" {
-			return artworks[i].StartDate > artworks[j].StartDate // DESC
-		}
-		// Only i has date - i comes first
-		if artworks[i].StartDate != "" && artworks[j].StartDate == "" {
-			return true
-		}
-		// Only j has date - j comes first
-		if artworks[i].StartDate == "" && artworks[j].StartDate != "" {
-			return false
-		}
-		// Neither has date - sort by title ASC
-		return strings.ToLower(artworks[i].Title) < strings.ToLower(artworks[j].Title)
-	})
+	sortArtworksForWeb(artworks)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(ArtworkListResponse{Artworks: artworks, Total: len(artworks)})
+}
+
+// sortArtworksForWeb sorts artworks:
+// 1) inProgress=true first
+// 2) then by startDate DESC (if both have a date)
+// 3) artworks without date are ordered by title ASC
+func sortArtworksForWeb(artworks []Artwork) {
+	sort.Slice(artworks, func(i, j int) bool {
+		a := artworks[i]
+		b := artworks[j]
+
+		// In progress first
+		if a.InProgress != b.InProgress {
+			return a.InProgress && !b.InProgress
+		}
+
+		aHasDate := strings.TrimSpace(a.StartDate) != ""
+		bHasDate := strings.TrimSpace(b.StartDate) != ""
+
+		// Both have dates => date DESC, tie-break title ASC
+		if aHasDate && bHasDate {
+			if a.StartDate != b.StartDate {
+				return a.StartDate > b.StartDate
+			}
+			return strings.ToLower(a.Title) < strings.ToLower(b.Title)
+		}
+
+		// Only one has date => dated first
+		if aHasDate != bHasDate {
+			return aHasDate && !bHasDate
+		}
+
+		// Neither has date => title ASC
+		return strings.ToLower(a.Title) < strings.ToLower(b.Title)
+	})
 }
 
 func generateArtworkID() string {
