@@ -40,3 +40,7 @@ source/backend/alexis-art-backend
 **/android/local.properties
 **/ios/Pods/
 **/ios/build/
+
+# Test coverage & TS build info
+**/coverage/
+*.tsbuildinfo
