@@ -4,36 +4,41 @@ import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { setToken } from '@/lib/auth'
 
-// Credenciales de prueba (TODO: cambiar a autenticación real)
-const TEST_USER = 'admin'
-const TEST_PASS = 'admin123'
-const ADMIN_TOKEN = process.env.NEXT_PUBLIC_ADMIN_TOKEN || 'f6b509373ffa88222c551d53f08deac9fd05d78896a9d21204c5bede98448304'
-
 export default function LoginPage() {
   const router = useRouter()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
 
-  const handleLogin = (user: string, pass: string) => {
-    if (user === TEST_USER && pass === TEST_PASS) {
-      setToken(ADMIN_TOKEN)
-      router.push('/artworks')
-    } else {
-      setError('Usuario o contraseña incorrectos')
+  // Credentials are verified server-side (/api/login). On success the server
+  // sets an httpOnly session cookie; the real backend token never reaches the
+  // browser. We only keep a non-secret client marker so the UI knows it's in.
+  const handleLogin = async (user: string, pass: string) => {
+    setError('')
+    setLoading(true)
+    try {
+      const res = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ username: user, password: pass }),
+      })
+      if (res.ok) {
+        setToken('1')
+        router.push('/artworks')
+      } else {
+        setError('Usuario o contraseña incorrectos')
+      }
+    } catch {
+      setError('No se pudo conectar. Intenta de nuevo.')
+    } finally {
+      setLoading(false)
     }
   }
 
   const onSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    setError('')
     handleLogin(username.trim(), password)
-  }
-
-  const onTestLogin = () => {
-    setUsername(TEST_USER)
-    setPassword(TEST_PASS)
-    handleLogin(TEST_USER, TEST_PASS)
   }
 
   return (
@@ -62,19 +67,8 @@ export default function LoginPage() {
           {error && (
             <p style={{ color: '#ff6b6b', marginBottom: 12 }}>{error}</p>
           )}
-          <button className="btn btnPrimary" type="submit" style={{ marginRight: 8 }}>
-            Entrar
-          </button>
-          <button
-            type="button"
-            className="btn"
-            onClick={onTestLogin}
-            style={{
-              backgroundColor: 'rgba(255,255,255,0.1)',
-              border: '1px solid rgba(255,255,255,0.2)'
-            }}
-          >
-            Usuario de Prueba
+          <button className="btn btnPrimary" type="submit" disabled={loading} style={{ marginRight: 8 }}>
+            {loading ? 'Entrando…' : 'Entrar'}
           </button>
         </form>
       </div>

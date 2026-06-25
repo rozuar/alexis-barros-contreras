@@ -58,6 +58,13 @@ services:
     environment:
       # El backoffice proxea server-side hacia el backend por la red interna.
       BACKEND_URL: "http://backend:8090"
+      # Mismo token que el backend: el login lo guarda en una cookie httpOnly
+      # y el proxy lo inyecta. NUNCA llega al navegador.
+      ADMIN_TOKEN: ${ADMIN_TOKEN:?define ADMIN_TOKEN en .env.prod}
+      # Credenciales de acceso al backoffice (se validan server-side).
+      BACKOFFICE_USER: ${BACKOFFICE_USER:-admin}
+      BACKOFFICE_PASS: ${BACKOFFICE_PASS:?define BACKOFFICE_PASS en .env.prod}
+      NODE_ENV: production
 
   caddy:
     image: caddy:2-alpine

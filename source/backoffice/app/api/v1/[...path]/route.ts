@@ -14,18 +14,32 @@ function buildTargetURL(req: NextRequest, path: string[]): URL {
   return target
 }
 
-function forwardHeaders(req: NextRequest): Headers {
-  // Forward Authorization etc., but remove hop-by-hop / invalid headers.
+function forwardHeaders(req: NextRequest, token: string): Headers {
   const h = new Headers(req.headers)
   h.delete('host')
   h.delete('connection')
   h.delete('content-length')
+  // Never trust a client-supplied token or forward our session cookie upstream.
+  // The backend admin token is injected here, server-side only.
+  h.delete('cookie')
+  h.delete('authorization')
+  h.set('authorization', `Bearer ${token}`)
   return h
 }
 
 async function proxy(req: NextRequest, params: { path: string[] }) {
+  // Require a valid session. The cookie value IS the backend admin token; it is
+  // httpOnly so it never reaches client JS.
+  const session = req.cookies.get('bo_session')?.value?.trim() || ''
+  if (!session) {
+    return new Response(JSON.stringify({ error: 'unauthorized' }), {
+      status: 401,
+      headers: { 'content-type': 'application/json; charset=utf-8' },
+    })
+  }
+
   const target = buildTargetURL(req, params.path)
-  const headers = forwardHeaders(req)
+  const headers = forwardHeaders(req, session)
   const pathStr = params.path.join('/')
   const shouldLog = pathStr.startsWith('admin/artworks')
 

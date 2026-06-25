@@ -131,7 +131,12 @@ export default function ArtworksPage() {
           </button>
           <button
             className="btn"
-            onClick={() => {
+            onClick={async () => {
+              try {
+                await fetch('/api/logout', { method: 'POST' })
+              } catch {
+                // ignore — clear client state regardless
+              }
               clearToken()
               router.push('/login')
             }}
