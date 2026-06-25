@@ -48,6 +48,9 @@ services:
     restart: unless-stopped
     depends_on:
       - backend
+    environment:
+      # El frontend proxea /api/v1/* server-side hacia el backend (red interna).
+      BACKEND_URL: "http://backend:8090"
 
   backoffice:
     build:
