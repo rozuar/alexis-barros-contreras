@@ -152,9 +152,24 @@ func main() {
 	// Root: convenient landing endpoint for Railway public domain
 	r.HandleFunc("/", rootInfo).Methods("GET", "HEAD")
 
-	// CORS configuration
+	// CORS configuration.
+	// Origins come from ALLOWED_ORIGINS (comma-separated). If unset, fall back to
+	// the production domains. Use ALLOWED_ORIGINS="*" for local development.
+	allowedOrigins := []string{
+		"https://alexisbarros.cl",
+		"https://www.alexisbarros.cl",
+		"https://admin.alexisbarros.cl",
+	}
+	if env := strings.TrimSpace(os.Getenv("ALLOWED_ORIGINS")); env != "" {
+		allowedOrigins = nil
+		for _, o := range strings.Split(env, ",") {
+			if o = strings.TrimSpace(o); o != "" {
+				allowedOrigins = append(allowedOrigins, o)
+			}
+		}
+	}
 	c := cors.New(cors.Options{
-		AllowedOrigins: []string{"*"}, // In production, specify exact origins
+		AllowedOrigins: allowedOrigins,
 		AllowedMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders: []string{"*"},
 	})

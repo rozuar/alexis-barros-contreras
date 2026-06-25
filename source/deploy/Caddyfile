@@ -1,0 +1,26 @@
+# Caddy obtiene y renueva certificados SSL automáticamente (Let's Encrypt).
+# Requisito: los dominios deben apuntar (A record) a la IP del Droplet.
+
+{
+	email {$ACME_EMAIL}
+}
+
+# Web pública (frontend)
+alexisbarros.cl, www.alexisbarros.cl {
+	reverse_proxy frontend:3000
+}
+
+# API (backend Go)
+api.alexisbarros.cl {
+	reverse_proxy backend:8090
+}
+
+# Backoffice (panel admin)
+admin.alexisbarros.cl {
+	reverse_proxy backoffice:3000
+}
+
+# Dominio alternativo -> redirige todo al principal (defensa de marca)
+alexisbarroscontreras.cl, www.alexisbarroscontreras.cl {
+	redir https://alexisbarros.cl{uri} permanent
+}

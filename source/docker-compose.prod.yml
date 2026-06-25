@@ -1,0 +1,83 @@
+# Producción en un solo Droplet de DigitalOcean.
+# Levanta Postgres + backend + frontend + backoffice + Caddy (SSL automático).
+# Uso:
+#   1) Copia deploy/.env.prod.example a .env.prod y rellena los valores.
+#   2) docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
+#
+# Las imágenes/videos se guardan en disco (volumen "art"), NO en S3/Spaces.
+# Para activar Spaces en el futuro, define las variables BUCKET_* en .env.prod.
+
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-alexis_art}
+      POSTGRES_USER: ${POSTGRES_USER:-alexis}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?define POSTGRES_PASSWORD en .env.prod}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-alexis} -d ${POSTGRES_DB:-alexis_art}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: "8090"
+      DATABASE_URL: "postgres://${POSTGRES_USER:-alexis}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-alexis_art}?sslmode=disable"
+      ADMIN_TOKEN: ${ADMIN_TOKEN:?define ADMIN_TOKEN en .env.prod}
+      ARTWORKS_DIR: /app/art
+      ALLOWED_ORIGINS: "https://alexisbarros.cl,https://www.alexisbarros.cl,https://admin.alexisbarros.cl"
+    volumes:
+      - art:/app/art
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # Next.js "hornea" las NEXT_PUBLIC_* en build, por eso va como build-arg.
+        NEXT_PUBLIC_API_URL: "https://api.alexisbarros.cl"
+    restart: unless-stopped
+    depends_on:
+      - backend
+
+  backoffice:
+    build:
+      context: ./backoffice
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      # El backoffice proxea server-side hacia el backend por la red interna.
+      BACKEND_URL: "http://backend:8090"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - frontend
+      - backoffice
+      - backend
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      ACME_EMAIL: ${ACME_EMAIL:?define ACME_EMAIL en .env.prod}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  pgdata:
+  art:
+  caddy_data:
+  caddy_config:

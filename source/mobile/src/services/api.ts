@@ -1,6 +1,6 @@
 import {Artwork, ArtworkListResponse} from '../types/artwork';
 
-const API_URL = 'http://localhost:8090'; // Change to your backend URL
+const API_URL = 'https://api.alexisbarros.cl'; // Backend API (use http://localhost:8090 or http://10.0.2.2:8090 for local dev)
 
 export const fetchArtworks = async (): Promise<Artwork[]> => {
   try {
