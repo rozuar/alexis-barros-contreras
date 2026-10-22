@@ -8,14 +8,14 @@ COPY backend/ ./
 RUN CGO_ENABLED=0 GOOS=linux go build -o /out/backend .
 
 
-FROM node:20-alpine AS frontend_deps
+FROM node:22-alpine AS frontend_deps
 WORKDIR /src/frontend
 RUN apk add --no-cache libc6-compat
 COPY frontend/package.json frontend/package-lock.json* ./
 RUN npm ci
 
 
-FROM node:20-alpine AS frontend_builder
+FROM node:22-alpine AS frontend_builder
 WORKDIR /src/frontend
 COPY --from=frontend_deps /src/frontend/node_modules ./node_modules
 COPY frontend/ ./
@@ -23,7 +23,7 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 
 
-FROM node:20-alpine AS runner
+FROM node:22-alpine AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
